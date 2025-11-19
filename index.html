@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BIALELE - Controle de Promissórias</title>
+    <!-- TailwindCSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Ícones (Heroicons) -->
+    <script type="module" src="https://unpkg.com/ionicons@5.5.2/dist/ionicons/ionicons.esm.js"></script>
+    <script nomodule src="https://unpkg.com/ionicons@5.5.2/dist/ionicons/ionicons.js"></script>
+    <!-- Biblioteca PapaParse para CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+
+    <style>
+        /* Fonte Inter (similar ao Inter) */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f6; /* Cor de fundo clara */
+        }
+        /* Ocultar elementos por padrão */
+        .hidden { display: none; }
+        /* Estilo para abas ativas */
+        .tab-active {
+            border-bottom-color: #3b82f6; /* Azul */
+            color: #3b82f6;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <!-- Firebase SDKs (v11.6.1) -->
+    <script type="module">
+        // Importações do Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            signInAnonymously, 
+            signInWithCustomToken, 
+            onAuthStateChanged,
+            setPersistence,
+            browserLocalPersistence
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            doc, 
+            getDoc, 
+            setDoc, 
+            addDoc, 
+            updateDoc, 
+            deleteDoc, 
+            onSnapshot, 
+            collection, 
+            query, 
+            where, 
+            getDocs,
+            Timestamp,
+            writeBatch,
+            setLogLevel // <-- CORREÇÃO: Removida a vírgula extra aqui
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- INÍCIO DA CONFIGURAÇÃO DO FIREBASE ---
+        // ATENÇÃO: Substitua pelo JSON de configuração do seu projeto Firebase
+        // Você pode obter isso no Console do Firebase > Configurações do Projeto
+        const firebaseConfigJson = typeof __firebase_config !== 'undefined' 
+            ? __firebase_config 
+            : '{ "apiKey": "SUA_API_KEY", "authDomain": "SEU_AUTH_DOMAIN", "projectId": "SEU_PROJECT_ID", "storageBucket": "SEU_STORAGE_BUCKET", "messagingSenderId": "SEU_SENDER_ID", "appId": "SEU_APP_ID" }';
+        
+        let firebaseConfig;
+        try {
+            firebaseConfig = JSON.parse(firebaseConfigJson);
+        } catch (e) {
+            console.error("Erro ao carregar configuração do Firebase:", e);
+            document.body.innerHTML = `<div class="p-4 text-center text-red-700 bg-red-100">Erro: Configuração do Firebase inválida. Verifique o objeto __firebase_config.</div>`;
+            // CORREÇÃO: Substituir 'return;' (ilegal no escopo global) 
+            // por 'throw new Error(...)' para interromper a execução do script.
+            throw new Error("Falha ao carregar a configuração do Firebase. Interrompendo o script.");
+        }
+
+        // Variáveis globais da aplicação
+        let app, auth, db, userId, currentView = 'clients';
+        let clientsCache = [];
+        let installmentsCache = [];
+        let currentClientId = null;
+        
+        // IDs dos elementos da UI
+        const ui = {
+            loader: document.getElementById('loader'),
+            appContainer: document.getElementById('app-container'),
+            clientsList: document.getElementById('clients-list'),
+            clientSearch: document.getElementById('client-search'),
+            addClientBtn: document.getElementById('add-client-btn'),
+            
+            // Modais
+            clientModal: document.getElementById('client-modal'),
+            clientModalTitle: document.getElementById('client-modal-title'),
+            clientForm: document.getElementById('client-form'),
+            deleteClientBtn: document.getElementById('delete-client-btn'),
+            
+            promissoryModal: document.getElementById('promissory-modal'),
+            promissoryForm: document.getElementById('promissory-form'),
+            installmentsContainer: document.getElementById('installments-container'),
+            
+            paymentModal: document.getElementById('payment-modal'),
+            paymentForm: document.getElementById('payment-form'),
+            paymentInstallmentsList: document.getElementById('payment-installments-list'),
+            paymentTotal: document.getElementById('payment-total'),
+            
+            ocrModal: document.getElementById('ocr-modal'),
+            ocrForm: document.getElementById('ocr-form'),
+            
+            // Tela do Cliente
+            clientDetailView: document.getElementById('client-detail-view'),
+            clientDetailName: document.getElementById('client-detail-name'),
+            clientDetailPhone: document.getElementById('client-detail-phone'),
+            clientDetailCpf: document.getElementById('client-detail-cpf'),
+            clientDetailNotes: document.getElementById('client-detail-notes'),
+            clientDetailTotalOpen: document.getElementById('client-detail-total-open'),
+            
+            openInstallmentsList: document.getElementById('open-installments-list'),
+            paidInstallmentsList: document.getElementById('paid-installments-list'),
+            tabOpen: document.getElementById('tab-open'),
+            tabPaid: document.getElementById('tab-paid'),
+
+            // Backup / Exportação
+            exportBtn: document.getElementById('export-btn'),
+            importBtn: document.getElementById('import-btn'),
+            importInput: document.getElementById('import-input'),
+            
+            // Botões de Navegação
+            backToClientsBtn: document.getElementById('back-to-clients-btn'),
+            
+            // Botões de Ação do Cliente
+            btnOpenAddPromissory: document.getElementById('btn-open-add-promissory'),
+            btnOpenAddOcr: document.getElementById('btn-open-add-ocr'),
+            btnOpenPayment: document.getElementById('btn-open-payment'),
+            btnEditClient: document.getElementById('btn-edit-client')
+        };
+
+        // --- INICIALIZAÇÃO E AUTENTICAÇÃO ---
+        
+        async function initializeAppAndAuth() {
+            try {
+                // Habilitar logs para debug
+                setLogLevel('Debug');
+                
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Persistência local para manter o login
+                await setPersistence(auth, browserLocalPersistence);
+
+                console.log("App e Firestore inicializados.");
+                
+                // Monitorar estado da autenticação
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Usuário autenticado:", userId);
+                        await loadInitialData();
+                    } else {
+                        console.log("Nenhum usuário logado. Tentando autenticação...");
+                        await attemptSignIn();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Erro na inicialização:", error);
+                showError("Falha ao conectar com o banco de dados.");
+            }
+        }
+
+        async function attemptSignIn() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    console.log("Tentando login com Custom Token...");
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    console.log("Tentando login anônimo...");
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Erro ao autenticar:", error);
+                showError("Falha na autenticação. Recarregue a página.");
+            }
+        }
+
+        // --- CARREGAMENTO DE DADOS (REALTIME) ---
+        
+        async function loadInitialData() {
+            if (!userId) {
+                console.warn("loadInitialData chamado sem userId.");
+                return;
+            }
+
+            ui.loader.classList.remove('hidden');
+            
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
+            
+            // Carregar Clientes (em tempo real)
+            const clientsQuery = query(collection(db, `artifacts/${appId}/users/${userId}/clients`));
+            onSnapshot(clientsQuery, (snapshot) => {
+                clientsCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderClientsList();
+                console.log("Clientes carregados:", clientsCache.length);
+            }, (error) => {
+                console.error("Erro ao carregar clientes:", error);
+                showError("Erro ao carregar clientes.");
+            });
+
+            // Carregar Parcelas (em tempo real)
+            const installmentsQuery = query(collection(db, `artifacts/${appId}/users/${userId}/installments`));
+            onSnapshot(installmentsQuery, (snapshot) => {
+                installmentsCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // Se estiver na tela de um cliente, atualiza a visão dele
+                if (currentView === 'clientDetail' && currentClientId) {
+                    renderClientDetail(currentClientId);
+                }
+                console.log("Parcelas carregadas:", installmentsCache.length);
+            }, (error) => {
+                console.error("Erro ao carregar parcelas:", error);
+                showError("Erro ao carregar parcelas.");
+            });
+
+            ui.loader.classList.add('hidden');
+            ui.appContainer.classList.remove('hidden');
+        }
+
+        // --- RENDERIZAÇÃO DA UI ---
+
+        function renderClientsList() {
+            const searchTerm = ui.clientSearch.value.toLowerCase();
+            const filteredClients = clientsCache.filter(c => c.name.toLowerCase().includes(searchTerm));
+
+            // Ordenar por nome
+            filteredClients.sort((a, b) => a.name.localeCompare(b.name));
+
+            if (filteredClients.length === 0) {
+                ui.clientsList.innerHTML = `<li class="p-4 text-center text-gray-500">Nenhum cliente encontrado.</li>`;
+                return;
+            }
+
+            ui.clientsList.innerHTML = filteredClients.map(client => {
+                // Calcular dívida total do cliente
+                const totalDebt = installmentsCache
+                    .filter(i => i.clientId === client.id && i.status === 'open')
+                    .reduce((acc, i) => acc + i.value, 0);
+
+                return `
+                    <li class="border-b border-gray-200 last:border-b-0">
+                        <button data-id="${client.id}" class="w-full flex justify-between items-center p-4 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 transition duration-150">
+                            <div class="text-left">
+                                <p class="font-semibold text-lg text-gray-900">${client.name}</p>
+                                <p class="text-sm text-gray-600">${client.phone}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="font-bold text-lg ${totalDebt > 0 ? 'text-red-600' : 'text-green-600'}">
+                                    ${formatCurrency(totalDebt)}
+                                </p>
+                                <p class="text-xs text-gray-500">Total em Aberto</p>
+                            </div>
+                        </button>
+                    </li>
+                `;
+            }).join('');
+        }
+
+        function renderClientDetail(clientId) {
+            const client = clientsCache.find(c => c.id === clientId);
+            if (!client) {
+                showError("Cliente não encontrado.");
+                showView('clients');
+                return;
+            }
+
+            currentClientId = clientId; // Define o cliente atual globalmente
+
+            // Preencher dados básicos
+            ui.clientDetailName.textContent = client.name;
+            ui.clientDetailPhone.textContent = client.phone || 'Não informado';
+            ui.clientDetailCpf.textContent = client.cpf || 'Não informado';
+            ui.clientDetailNotes.textContent = client.notes || 'Nenhuma observação.';
+
+            // Filtrar parcelas
+            const clientInstallments = installmentsCache.filter(i => i.clientId === clientId);
+            
+            // Ordenar por data de vencimento (mais antiga primeiro)
+            clientInstallments.sort((a, b) => a.dueDate.toMillis() - b.dueDate.toMillis());
+
+            const openInstallments = clientInstallments.filter(i => i.status === 'open');
+            const paidInstallments = clientInstallments.filter(i => i.status === 'paid');
+
+            const totalOpen = openInstallments.reduce((acc, i) => acc + i.value, 0);
+            ui.clientDetailTotalOpen.textContent = formatCurrency(totalOpen);
+
+            // Renderizar listas
+            renderInstallmentList(ui.openInstallmentsList, openInstallments, 'open');
+            renderInstallmentList(ui.paidInstallmentsList, paidInstallments, 'paid');
+
+            // Mostrar view
+            showView('clientDetail');
+            // Garantir que a aba "Em Aberto" seja a padrão
+            showTab('open');
+        }
+
+        function renderInstallmentList(element, installments, type) {
+            if (installments.length === 0) {
+                element.innerHTML = `<li class="p-4 text-center text-gray-500">Nenhuma parcela ${type === 'open' ? 'em aberto' : 'paga'}.</li>`;
+                return;
+            }
+
+            element.innerHTML = installments.map(item => {
+                const dueDate = item.dueDate.toDate();
+                const isOverdue = type === 'open' && dueDate < new Date();
+                
+                return `
+                    <li class="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg mb-2 shadow-sm">
+                        <div>
+                            <p class="font-semibold text-gray-800">${formatCurrency(item.value)}</p>
+                            <p class="text-sm ${isOverdue ? 'text-red-600 font-medium' : 'text-gray-600'}">
+                                Venc: ${formatDate(dueDate)} ${isOverdue ? '(Vencida)' : ''}
+                            </p>
+                            ${item.notes ? `<p class="text-xs text-gray-500 italic">Obs: ${item.notes}</p>` : ''}
+                        </div>
+                        ${type === 'open' ? `
+                        <button data-id="${item.id}" class="btn-pay-single text-xs bg-blue-500 text-white px-3 py-1 rounded-full hover:bg-blue-600 transition">
+                            Pagar
+                        </button>
+                        ` : `
+                        <div class="text-right text-xs">
+                            <p class="text-green-600 font-medium">Pago em:</p>
+                            <p class="text-gray-600">${item.paidAt ? formatDate(item.paidAt.toDate()) : '-'}</p>
+                            <p class="text-gray-500">${item.paymentMethod || ''}</p>
+                        </div>
+                        `}
+                    </li>
+                `;
+            }).join('');
+        }
+        
+        // --- GERENCIAMENTO DE VIEWS E MODAIS ---
+
+        function showView(viewName) {
+            currentView = viewName;
+            document.getElementById('clients-view').classList.toggle('hidden', viewName !== 'clients');
+            document.getElementById('client-detail-view').classList.toggle('hidden', viewName !== 'clientDetail');
+        }
+
+        function showModal(modalElement, reset = true) {
+            if (reset) {
+                modalElement.querySelectorAll('form').forEach(form => form.reset());
+            }
+            // Limpar formulários específicos
+            if (modalElement === ui.promissoryModal) {
+                ui.installmentsContainer.innerHTML = '';
+            }
+            if (modalElement === ui.paymentModal) {
+                ui.paymentInstallmentsList.innerHTML = '';
+                ui.paymentTotal.textContent = formatCurrency(0);
+            }
+
+            modalElement.classList.remove('hidden');
+        }
+
+        function closeModal(modalElement) {
+            modalElement.classList.add('hidden');
+        }
+
+        function showTab(tabName) {
+            // Abas
+            ui.tabOpen.classList.toggle('tab-active', tabName === 'open');
+            ui.tabPaid.classList.toggle('tab-active', tabName === 'paid');
+            
+            // Conteúdo
+            document.getElementById('open-installments-content').classList.toggle('hidden', tabName !== 'open');
+            document.getElementById('paid-installments-content').classList.toggle('hidden', tabName !== 'paid');
+        }
+
+        // --- LÓGICA DE NEGÓCIO (CRUD) ---
+
+        // Salvar Cliente (Criar ou Editar)
+        async function handleSaveClient(e) {
+            e.preventDefault(); // Prevenir envio do formulário
+            const formData = new FormData(ui.clientForm);
+            const clientId = formData.get('clientId');
+            
+            const clientData = {
+                name: formData.get('name'),
+                phone: formData.get('phone'),
+                cpf: formData.get('cpf'),
+                notes: formData.get('notes'),
+            };
+
+            // Validação
+            if (!clientData.name || !clientData.phone) {
+                showError("Nome e Telefone são obrigatórios.");
+                return;
+            }
+
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
+            ui.loader.classList.remove('hidden');
+            
+            try {
+                let docRef;
+                if (clientId) {
+                    // Editando
+                    docRef = doc(db, `artifacts/${appId}/users/${userId}/clients`, clientId);
+                    await updateDoc(docRef, clientData);
+                    showSuccess("Cliente atualizado com sucesso!");
+                } else {
+                    // Criando
+                    clientData.createdAt = Timestamp.now();
+                    docRef = collection(db, `artifacts/${appId}/users/${userId}/clients`);
+                    await addDoc(docRef, clientData);
+                    showSuccess("Cliente cadastrado com sucesso!");
+                }
+                closeModal(ui.clientModal);
+            } catch (error) {
+                console.error("Erro ao salvar cliente:", error);
+                showError("Erro ao salvar cliente.");
+            } finally {
+                ui.loader.classList.add('hidden');
+            }
+        }
+        
+        // Deletar Cliente (com confirmação)
+        async function handleDeleteClient() {
+            // ATENÇÃO: Substituir por um modal customizado, pois window.confirm não funciona.
+            // Esta é uma simulação de confirmação.
+            const confirmation = prompt("Tem certeza que deseja excluir este cliente? Isso NÃO excluirá as parcelas, mas o desvinculará. Digite 'EXCLUIR' para confirmar.");
+            
+            if (confirmation !== 'EXCLUIR') {
+                showError("Exclusão cancelada.");
+                return;
+            }
+
+            const clientId = ui.clientForm.elements.clientId.value;
+            if (!clientId) return;
+
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
+            ui.loader.classList.remove('hidden');
+            
+            try {
+                // A regra é NÃO excluir parcelas, apenas o cliente.
+                // As parcelas ficarão "órfãs", mas ainda no histórico.
+                // Uma lógica melhor seria arquivar o cliente (adicionar `status: 'archived'`)
+                
+                await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/clients`, clientId));
+                showSuccess("Cliente excluído.");
+                closeModal(ui.clientModal);
+                showView('clients');
+            } catch (error) {
+                console.error("Erro ao excluir cliente:", error);
+                showError("Erro ao excluir cliente.");
+            } finally {
+                ui.loader.classList.add('hidden');
+            }
+        }
+
+        // Gerar campos de data para parcelas
+        function generateInstallmentFields() {
+            const totalValue = parseFloat(ui.promissoryForm.elements.totalValue.value);
+            const numInstallments = parseInt(ui.promissoryForm.elements.numInstallments.value);
+            const firstDueDate = ui.promissoryForm.elements.firstDueDate.value;
+            
+            ui.installmentsContainer.innerHTML = '';
+            
+            if (!totalValue || !numInstallments || !firstDueDate) {
+                showError("Preencha Valor, Nº de Parcelas e 1º Vencimento.");
+                return;
+            }
+            
+            const valuePerInstallment = (totalValue / numInstallments).toFixed(2);
+            let currentDate = new Date(firstDueDate + 'T12:00:00'); // Tratar como meio-dia local
+
+            let fieldsHtml = '';
+            for (let i = 1; i <= numInstallments; i++) {
+                fieldsHtml += `
+                    <div class="grid grid-cols-2 gap-2 mb-2 p-2 border rounded">
+                        <p class="col-span-2 font-semibold">Parcela ${i} de ${numInstallments}</p>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Valor (R$)</label>
+                            <input type="number" name="inst_value_${i}" value="${valuePerInstallment}" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Vencimento</label>
+                            <input type="date" name="inst_date_${i}" value="${currentDate.toISOString().split('T')[0]}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" required>
+                        </div>
+                    </div>
+                `;
+                // Adiciona um mês para a próxima parcela
+                currentDate.setMonth(currentDate.getMonth() + 1);
+            }
+            ui.installmentsContainer.innerHTML = fieldsHtml;
+        }
+
+        // Salvar Nova Promissória (Múltiplas Parcelas)
+        async function handleSavePromissory(e) {
+            e.preventDefault();
+            if (!currentClientId) return;
+
+            const client = clientsCache.find(c => c.id === currentClientId);
+            if (!client) return;
+            
+            const form = new FormData(ui.promissoryForm);
+            const numInstallments = parseInt(form.get('numInstallments'));
+            const notes = form.get('notes') || '';
+            const purchaseId = crypto.randomUUID(); // ID único para esta compra
+            
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
+            ui.loader.classList.remove('hidden');
+
+            try {
+                const batch = writeBatch(db);
+                
+                for (let i = 1; i <= numInstallments; i++) {
+                    const value = parseFloat(form.get(`inst_value_${i}`));
+                    const dateStr = form.get(`inst_date_${i}`);
+                    
+                    if (!value || !dateStr) {
+                        throw new Error(`Dados inválidos para parcela ${i}`);
+                    }
+                    
+                    const dueDate = Timestamp.fromDate(new Date(dateStr + 'T12:00:00'));
+
+                    const newInstallmentRef = doc(collection(db, `artifacts/${appId}/users/${userId}/installments`));
+                    batch.set(newInstallmentRef, {
+                        clientId: currentClientId,
+                        clientName: client.name,
+                        value: value,
+                        dueDate: dueDate,
+                        status: 'open',
+                        notes: notes,
+                        createdAt: Timestamp.now(),
+                        code: `${client.name.substring(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}${i}`,
+                        totalPurchaseId: purchaseId,
+                        installmentNumber: i,
+                        totalInstallments: numInstallments,
+                    });
+                }
+                
+                await batch.commit();
+                showSuccess("Promissória e parcelas registradas!");
+                closeModal(ui.promissoryModal);
+                
+            } catch (error) {
+                console.error("Erro ao salvar promissória:", error);
+                showError("Erro ao salvar parcelas. Verifique os dados.");
+            } finally {
+                ui.loader.classList.add('hidden');
+            }
+        }
+        
+        // Salvar Pagamento (Múltiplas Parcelas)
+        async function handleSavePayment(e) {
+            e.preventDefault();
+            if (!currentClientId) return;
+            
+            const form = new FormData(ui.paymentForm);
+            const paymentDate = Timestamp.fromDate(new Date(form.get('paymentDate') + 'T12:00:00'));
+            const paymentMethod = form.get('paymentMethod');
+            const selectedIds = Array.from(ui.paymentInstallmentsList.querySelectorAll('input[type=checkbox]:checked'))
+                                     .map(input => input.value);
+            
+            if (selectedIds.length === 0) {
+                showError("Selecione ao menos uma parcela para pagar.");
+                return;
+            }
+            
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
+            ui.loader.classList.remove('hidden');
+            
+            try {
+                const batch = writeBatch(db);
+                
+                for (const id of selectedIds) {
+                    const docRef = doc(db, `artifacts/${appId}/users/${userId}/installments`, id);
+                    batch.update(docRef, {
+                        status: 'paid',
+                        paidAt: paymentDate,
+                        paymentMethod: paymentMethod
+                    });
+                }
+                
+                await batch.commit();
+                showSuccess("Pagamento registrado com sucesso!");
+                closeModal(ui.paymentModal);
+                
+            } catch (error) {
+                console.error("Erro ao registrar pagamento:", error);
+                showError("Erro ao registrar pagamento.");
+            } finally {
+                ui.loader.classList.add('hidden');
+            }
+        }
+
+        // --- SIMULAÇÃO DE OCR ---
+        
+        // Salva a parcela "lida" pela IA (simulada)
+        async function handleSaveOcr(e) {
+            e.preventDefault();
+            if (!currentClientId) return;
+
+            const client = clientsCache.find(c => c.id === currentClientId);
+            if (!client) return;
+
+            const form = new FormData(ui.ocrForm);
+            const value = parseFloat(form.get('ocr_value'));
+            const dateStr = form.get('ocr_dueDate');
+            const notes = form.get('ocr_notes') || 'Lançado via Foto (Simulado)';
+
+            if (!value || !dateStr) {
+                showError("Valor e Vencimento são obrigatórios.");
+                return;
+            }
+
+            const dueDate = Timestamp.fromDate(new Date(dateStr + 'T12:00:00'));
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
+            ui.loader.classList.remove('hidden');
+
+            try {
+                const docRef = collection(db, `artifacts/${appId}/users/${userId}/installments`);
+                await addDoc(docRef, {
+                    clientId: currentClientId,
+                    clientName: client.name,
+                    value: value,
+                    dueDate: dueDate,
+                    status: 'open',
+                    notes: notes,
+                    createdAt: Timestamp.now(),
+                    code: `${client.name.substring(0, 3).toUpperCase()}-OCR-${Date.now().toString().slice(-4)}`,
+                    totalPurchaseId: crypto.randomUUID(),
+                    installmentNumber: 1,
+                    totalInstallments: 1,
+                });
+                
+                showSuccess("Parcela (via foto) registrada!");
+                closeModal(ui.ocrModal);
+
+            } catch (error) {
+                console.error("Erro ao salvar parcela OCR:", error);
+                showError("Erro ao salvar parcela.");
+            } finally {
+                ui.loader.classList.add('hidden');
+            }
+        }
+        
+        // --- HANDLERS DE EVENTOS DA UI ---
+
+        function setupEventListeners() {
+            // Filtro de Clientes
+            ui.clientSearch.addEventListener('input', renderClientsList);
+            
+            // Abrir Modal de Novo Cliente
+            ui.addClientBtn.addEventListener('click', () => {
+                ui.clientForm.reset();
+                ui.clientForm.elements.clientId.value = '';
+                ui.clientModalTitle.textContent = "Cadastrar Novo Cliente";
+                ui.deleteClientBtn.classList.add('hidden');
+                showModal(ui.clientModal);
+            });
+            
+            // Abrir Cliente (clicando na lista)
+            ui.clientsList.addEventListener('click', e => {
+                const button = e.target.closest('button[data-id]');
+                if (button) {
+                    renderClientDetail(button.dataset.id);
+                }
+            });
+            
+            // Voltar para lista de clientes
+            ui.backToClientsBtn.addEventListener('click', () => showView('clients'));
+
+            // Salvar Cliente (Form)
+            ui.clientForm.addEventListener('submit', handleSaveClient);
+            
+            // Deletar Cliente
+            ui.deleteClientBtn.addEventListener('click', handleDeleteClient);
+            
+            // Abas da Tela do Cliente
+            ui.tabOpen.addEventListener('click', () => showTab('open'));
+            ui.tabPaid.addEventListener('click', () => showTab('paid'));
+            
+            // Botões de Ação do Cliente
+            ui.btnEditClient.addEventListener('click', () => {
+                const client = clientsCache.find(c => c.id === currentClientId);
+                if (!client) return;
+                
+                ui.clientForm.elements.clientId.value = client.id;
+                ui.clientForm.elements.name.value = client.name;
+                ui.clientForm.elements.phone.value = client.phone;
+                ui.clientForm.elements.cpf.value = client.cpf;
+                ui.clientForm.elements.notes.value = client.notes;
+                
+                ui.clientModalTitle.textContent = "Editar Cliente";
+                ui.deleteClientBtn.classList.remove('hidden');
+                showModal(ui.clientModal, false); // Não reseta o form
+            });
+            
+            ui.btnOpenAddPromissory.addEventListener('click', () => {
+                showModal(ui.promissoryModal);
+            });
+            
+            ui.btnOpenAddOcr.addEventListener('click', () => {
+                // Simulação de OCR: A "IA" "leu" a foto e preencheu o form.
+                // Na vida real, aqui você faria o upload, chamaria a Cloud Function
+                // e receberia os dados de volta.
+                const form = ui.ocrForm;
+                form.reset();
+                form.elements.ocr_value.value = Math.floor(Math.random() * 200) + 50; // Valor aleatório
+                let d = new Date();
+                d.setMonth(d.getMonth() + 1);
+                form.elements.ocr_dueDate.value = d.toISOString().split('T')[0]; // Mês que vem
+                
+                showModal(ui.ocrModal, false);
+            });
+            
+            ui.btnOpenPayment.addEventListener('click', () => {
+                // Carregar parcelas em aberto no modal de pagamento
+                const openInstallments = installmentsCache
+                    .filter(i => i.clientId === currentClientId && i.status === 'open')
+                    .sort((a, b) => a.dueDate.toMillis() - b.dueDate.toMillis());
+                
+                if (openInstallments.length === 0) {
+                    showError("Este cliente não possui parcelas em aberto.");
+                    return;
+                }
+                
+                ui.paymentInstallmentsList.innerHTML = openInstallments.map(item => `
+                    <label class="flex items-center justify-between p-3 bg-gray-50 border rounded-md mb-2 cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-400">
+                        <div class="flex items-center">
+                            <input type="checkbox" name="installments" value="${item.id}" class="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 payment-checkbox">
+                            <div class="ml-3">
+                                <p class="font-semibold text-gray-800">${formatCurrency(item.value)}</p>
+                                <p class="text-sm text-gray-600">Venc: ${formatDate(item.dueDate.toDate())}</p>
+                            </div>
+                        </div>
+                    </label>
+                `).join('');
+                
+                // Setar data de pagamento para hoje
+                ui.paymentForm.elements.paymentDate.value = new Date().toISOString().split('T')[0];
+                updatePaymentTotal();
+                showModal(ui.paymentModal);
+            });
+            
+            // Pagar Parcela Única (da lista)
+            ui.openInstallmentsList.addEventListener('click', e => {
+                const button = e.target.closest('.btn-pay-single');
+                if (button) {
+                    const installmentId = button.dataset.id;
+                    const installment = installmentsCache.find(i => i.id === installmentId);
+                    
+                    // Simular abertura do modal de pagamento com esta parcela selecionada
+                    ui.btnOpenPayment.click();
+                    
+                    // Marcar a parcela específica
+                    const checkbox = ui.paymentInstallmentsList.querySelector(`input[value="${installmentId}"]`);
+                    if (checkbox) {
+                        checkbox.checked = true;
+                        updatePaymentTotal();
+                    }
+                }
+            });
+            
+            // Atualizar total no modal de pagamento
+            ui.paymentInstallmentsList.addEventListener('change', updatePaymentTotal);
+
+            // Gerar Parcelas (Form Promissória)
+            ui.promissoryForm.elements.generateFieldsBtn.addEventListener('click', generateInstallmentFields);
+
+            // Salvar Forms
+            ui.promissoryForm.addEventListener('submit', handleSavePromissory);
+            ui.paymentForm.addEventListener('submit', handleSavePayment);
+            ui.ocrForm.addEventListener('submit', handleSaveOcr);
+
+            // Fechar Modais
+            document.querySelectorAll('.modal-close').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    closeModal(btn.closest('.modal'));
+                });
+            });
+
+            // Exportação / Importação
+            ui.exportBtn.addEventListener('click', exportDataToCSV);
+            ui.importBtn.addEventListener('click', () => ui.importInput.click());
+            ui.importInput.addEventListener('change', handleImportCSV);
+        }
+        
+        // Atualiza o total a pagar no modal de pagamento
+        function updatePaymentTotal() {
+            const selectedIds = Array.from(ui.paymentInstallmentsList.querySelectorAll('input:checked')).map(i => i.value);
+            const total = selectedIds.reduce((acc, id) => {
+                const item = installmentsCache.find(i => i.id === id);
+                return acc + (item ? item.value : 0);
+            }, 0);
+            ui.paymentTotal.textContent = formatCurrency(total);
+        }
+        
+        // --- IMPORTAÇÃO E EXPORTAÇÃO (CSV) ---
+        
+        async function exportDataToCSV() {
+            showSuccess("Exportando dados... Isso pode levar um momento.");
+            
+            // 1. Clientes
+            const clientsData = clientsCache.map(c => ({
+                id: c.id,
+                name: c.name,
+                phone: c.phone,
+                cpf: c.cpf,
+                notes: c.notes,
+                createdAt: c.createdAt ? c.createdAt.toDate().toISOString() : '',
+            }));
+            
+            // 2. Parcelas
+            // Precisamos garantir que temos TODAS as parcelas, não apenas o cache
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
+            const allInstallmentsQuery = query(collection(db, `artifacts/${appId}/users/${userId}/installments`));
+            const snapshot = await getDocs(allInstallmentsQuery);
+            const allInstallments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            const installmentsData = allInstallments.map(i => ({
+                id: i.id,
+                clientId: i.clientId,
+                clientName: i.clientName,
+                value: i.value,
+                dueDate: i.dueDate ? i.dueDate.toDate().toISOString() : '',
+                status: i.status,
+                notes: i.notes,
+                createdAt: i.createdAt ? i.createdAt.toDate().toISOString() : '',
+                code: i.code,
+                totalPurchaseId: i.totalPurchaseId,
+                installmentNumber: i.installmentNumber,
+                totalInstallments: i.totalInstallments,
+                paidAt: i.paidAt ? i.paidAt.toDate().toISOString() : '',
+                paymentMethod: i.paymentMethod,
+            }));
+
+            // Gerar e baixar CSVs
+            downloadCSV(Papa.unparse(clientsData), 'bialele_clientes.csv');
+            downloadCSV(Papa.unparse(installmentsData), 'bialele_parcelas.csv');
+        }
+
+        function downloadCSV(csvString, filename) {
+            const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function handleImportCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Simulação de confirmação
+            const confirmation = prompt(`Tem certeza que quer importar o arquivo "${file.name}"? Isso pode sobrescrever dados. Digite 'IMPORTAR'.`);
+            if (confirmation !== 'IMPORTAR') {
+                event.target.value = null; // Limpa o input
+                return;
+            }
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: async (results) => {
+                    if (file.name.includes('clientes')) {
+                        await importData('clients', results.data);
+                    } else if (file.name.includes('parcelas')) {
+                        await importData('installments', results.data);
+                    } else {
+                        showError("Nome de arquivo não reconhecido. Use 'bialele_clientes.csv' ou 'bialele_parcelas.csv'.");
+                    }
+                    event.target.value = null; // Limpa o input
+                },
+                error: (err) => {
+                    showError("Erro ao ler o arquivo CSV: " + err.message);
+                    event.target.value = null;
+                }
+            });
+        }
+        
+        async function importData(collectionName, data) {
+            if (!data || data.length === 0) {
+                showError("Arquivo CSV vazio ou inválido.");
+                return;
+            }
+            
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
+            ui.loader.classList.remove('hidden');
+            
+            try {
+                const batch = writeBatch(db);
+                let counter = 0;
+                
+                for (const item of data) {
+                    if (!item.id) continue; // Precisa de ID para restaurar
+                    
+                    let docRef = doc(db, `artifacts/${appId}/users/${userId}/${collectionName}`, item.id);
+                    let processedItem = { ...item };
+
+                    // Converter datas de string ISO para Timestamps
+                    const dateFields = ['createdAt', 'dueDate', 'paidAt'];
+                    dateFields.forEach(field => {
+                        if (processedItem[field]) {
+                            processedItem[field] = Timestamp.fromDate(new Date(processedItem[field]));
+                        }
+                    });
+
+                    // Converter valores numéricos
+                    const numericFields = ['value', 'installmentNumber', 'totalInstallments'];
+                    numericFields.forEach(field => {
+                        if (processedItem[field]) {
+                            processedItem[field] = parseFloat(processedItem[field]);
+                        }
+                    });
+
+                    batch.set(docRef, processedItem); // Usar set() para sobrescrever
+                    counter++;
+                    
+                    // O Firestore Batch tem limite de 500 operações
+                    if (counter % 499 === 0) {
+                        await batch.commit();
+                        batch = writeBatch(db); // Inicia novo batch
+                    }
+                }
+                
+                await batch.commit(); // Commita o restante
+                showSuccess(`Importação de ${collectionName} concluída! ${counter} registros processados.`);
+                
+            } catch (error) {
+                console.error("Erro na importação:", error);
+                showError("Erro grave durante a importação.");
+            } finally {
+                ui.loader.classList.add('hidden');
+            }
+        }
+
+        // --- UTILITÁRIOS ---
+        
+        function formatCurrency(value) {
+            return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        }
+
+        function formatDate(date) {
+            return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' }); // UTC para evitar bugs de fuso
+        }
+
+        function showSuccess(message) {
+            // Implementar um toast/snackbar customizado
+            console.log("SUCESSO:", message);
+            // Simples simulação de toast
+            const toast = document.createElement('div');
+            toast.className = 'fixed top-5 right-5 bg-green-500 text-white p-3 rounded-lg shadow-lg z-50';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function showError(message) {
+            // Implementar um toast/snackbar customizado
+            console.error("ERRO:", message);
+            // Simples simulação de toast de erro
+            const toast = document.createElement('div');
+            toast.className = 'fixed top-5 right-5 bg-red-600 text-white p-3 rounded-lg shadow-lg z-50';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+        
+        // --- INICIALIZAÇÃO DA APLICAÇÃO ---
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            initializeAppAndAuth();
+        });
+
+    </script>
+
+    <!-- Loader Global -->
+    <div id="loader" class="fixed inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-600"></div>
+    </div>
+
+    <!-- Container Principal da Aplicação -->
+    <div id="app-container" class="max-w-4xl mx-auto p-4 hidden">
+
+        <!-- Cabeçalho -->
+        <header class="mb-6 pb-4 border-b border-gray-300">
+            <h1 class="text-3xl font-bold text-gray-900">BIALELE - Controle de Promissórias</h1>
+            <p class="text-gray-600">Gestão simplificada de vendas parceladas.</p>
+        </header>
+
+        <!-- (VIEW 1) Lista de Clientes (Dashboard) -->
+        <div id="clients-view">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-3">
+                <div class="relative w-full sm:w-auto flex-grow">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <ion-icon name="search-outline" class="text-gray-400"></ion-icon>
+                    </div>
+                    <input type="text" id="client-search" placeholder="Buscar cliente por nome..." class="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                <button id="add-client-btn" class="w-full sm:w-auto flex-shrink-0 flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition duration-150">
+                    <ion-icon name="add-outline" class="text-xl"></ion-icon>
+                    Novo Cliente
+                </button>
+            </div>
+            
+            <ul id="clients-list" class="bg-white rounded-lg shadow-lg overflow-hidden divide-y divide-gray-200">
+                <!-- Clientes serão renderizados aqui pelo JS -->
+            </ul>
+            
+            <!-- Seção de Backup -->
+            <div class="mt-8 p-4 bg-gray-100 rounded-lg border border-gray-200">
+                <h3 class="font-semibold text-lg mb-2">Backup e Restauração</h3>
+                <p class="text-sm text-gray-600 mb-4">Exporte todos os dados para CSV ou importe um backup.</p>
+                <div class="flex gap-4">
+                    <button id="export-btn" class="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition">
+                        <ion-icon name="download-outline"></ion-icon>
+                        Exportar TUDO (CSV)
+                    </button>
+                    <button id="import-btn" class="flex items-center gap-2 bg-yellow-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-yellow-600 transition">
+                        <ion-icon name="cloud-upload-outline"></ion-icon>
+                        Importar (CSV)
+                    </button>
+                    <input type="file" id="import-input" class="hidden" accept=".csv">
+                </div>
+            </div>
+        </div>
+
+        <!-- (VIEW 2) Detalhes do Cliente -->
+        <div id="client-detail-view" class="hidden">
+            <!-- Navegação -->
+            <div class="mb-4">
+                <button id="back-to-clients-btn" class="flex items-center gap-1 text-blue-600 hover:underline font-medium">
+                    <ion-icon name="arrow-back-outline"></ion-icon>
+                    Voltar para Clientes
+                </button>
+            </div>
+
+            <!-- Card de Resumo do Cliente -->
+            <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+                <!-- Cabeçalho do Cliente -->
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <h2 id="client-detail-name" class="text-3xl font-bold text-gray-900">Nome do Cliente</h2>
+                        <div class="flex items-center gap-4 text-gray-600 mt-1">
+                            <span class="flex items-center gap-1"><ion-icon name="call-outline"></ion-icon> <span id="client-detail-phone"></span></span>
+                            <span class="flex items-center gap-1"><ion-icon name="id-card-outline"></ion-icon> <span id="client-detail-cpf"></span></span>
+                        </div>
+                    </div>
+                    <button id="btn-edit-client" class="text-gray-500 hover:text-blue-600 p-2 rounded-full hover:bg-gray-100">
+                        <ion-icon name="pencil-outline" class="text-xl"></ion-icon>
+                    </button>
+                </div>
+                
+                <!-- Observações -->
+                <div class="mb-6">
+                    <p class="text-sm text-gray-500 italic" id="client-detail-notes"></p>
+                </div>
+                
+                <!-- Total Devedor -->
+                <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-center">
+                    <p class="text-sm font-medium text-red-700">TOTAL EM ABERTO</p>
+                    <p id="client-detail-total-open" class="text-4xl font-extrabold text-red-600">R$ 0,00</p>
+                </div>
+
+                <!-- Botões de Ação Grandes -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <button id="btn-open-payment" class="w-full flex-1 flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-green-700 transition">
+                        <ion-icon name="cash-outline" class="text-xl"></ion-icon>
+                        Registrar Pagamento
+                    </button>
+                    <button id="btn-open-add-promissory" class="w-full flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition">
+                        <ion-icon name="add-circle-outline" class="text-xl"></ion-icon>
+                        Nova Promissória
+                    </button>
+                    <button id="btn-open-add-ocr" class="w-full flex-1 flex items-center justify-center gap-2 bg-purple-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-purple-700 transition" title="Simulação de cadastro por foto">
+                        <ion-icon name="camera-outline" class="text-xl"></ion-icon>
+                        Lançar por Foto (IA)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Abas de Parcelas -->
+            <div>
+                <div class="border-b border-gray-200 mb-4">
+                    <nav class="flex -mb-px space-x-6">
+                        <button id="tab-open" class="py-3 px-1 border-b-2 font-medium text-lg text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors duration-150 tab-active">
+                            Em Aberto
+                        </button>
+                        <button id="tab-paid" class="py-3 px-1 border-b-2 font-medium text-lg text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors duration-150">
+                            Pagas
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Conteúdo da Aba "Em Aberto" -->
+                <div id="open-installments-content">
+                    <ul id="open-installments-list">
+                        <!-- Parcelas em aberto renderizadas aqui -->
+                    </ul>
+                </div>
+
+                <!-- Conteúdo da Aba "Pagas" -->
+                <div id="paid-installments-content" class="hidden">
+                    <ul id="paid-installments-list">
+                        <!-- Parcelas pagas renderizadas aqui -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAIS (Flutuantes) -->
+
+    <!-- Modal: Adicionar/Editar Cliente -->
+    <div id="client-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-40 p-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in">
+            <button class="modal-close absolute top-3 right-3 text-gray-400 hover:text-gray-600">
+                <ion-icon name="close-circle-outline" class="text-3xl"></ion-icon>
+            </button>
+            <h3 id="client-modal-title" class="text-2xl font-bold mb-6">Cadastrar Novo Cliente</h3>
+            
+            <form id="client-form">
+                <input type="hidden" name="clientId">
+                <div class="space-y-4">
+                    <div>
+                        <label for="name" class="block text-sm font-medium text-gray-700">Nome Completo *</label>
+                        <input type="text" name="name" id="name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                    </div>
+                    <div>
+                        <label for="phone" class="block text-sm font-medium text-gray-700">Telefone (com DDD) *</label>
+                        <input type="tel" name="phone" id="phone" placeholder="(XX) 9XXXX-XXXX" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                    </div>
+                    <div>
+                        <label for="cpf" class="block text-sm font-medium text-gray-700">CPF (Opcional)</label>
+                        <input type="text" name="cpf" id="cpf" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3">
+                    </div>
+                    <div>
+                        <label for="notes" class="block text-sm font-medium text-gray-700">Observações (Opcional)</label>
+                        <textarea name="notes" id="notes" rows="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3"></textarea>
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-between gap-4">
+                    <button type="button" id="delete-client-btn" class="hidden flex items-center justify-center gap-2 bg-red-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-red-700 transition">
+                        <ion-icon name="trash-outline"></ion-icon>
+                        Excluir
+                    </button>
+                    <button type="submit" class="flex-grow flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition">
+                        <ion-icon name="save-outline"></ion-icon>
+                        Salvar Cliente
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Modal: Adicionar Promissória (Manual) -->
+    <div id="promissory-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-40 p-4 overflow-y-auto">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative">
+            <button class="modal-close absolute top-3 right-3 text-gray-400 hover:text-gray-600">
+                <ion-icon name="close-circle-outline" class="text-3xl"></ion-icon>
+            </button>
+            <h3 class="text-2xl font-bold mb-6">Nova Promissória (Manual)</h3>
+            
+            <form id="promissory-form">
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Valor Total (R$)</label>
+                            <input type="number" name="totalValue" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Nº de Parcelas</label>
+                            <input type="number" name="numInstallments" min="1" step="1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">1º Vencimento</label>
+                        <input type="date" name="firstDueDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Observações (Opcional)</label>
+                        <input type="text" name="notes" placeholder="Ex: Compra da Jaqueta Azul" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3">
+                    </div>
+                    
+                    <button type="button" id="generateFieldsBtn" class="w-full flex items-center justify-center gap-2 bg-gray-200 text-gray-800 px-5 py-3 rounded-lg font-semibold hover:bg-gray-300 transition">
+                        <ion-icon name="list-outline"></ion-icon>
+                        Gerar Campos das Parcelas
+                    </button>
+                    
+                    <hr>
+                    
+                    <h4 class="font-semibold">Detalhes das Parcelas:</h4>
+                    <div id="installments-container" class="max-h-48 overflow-y-auto space-y-2 bg-gray-50 p-2 rounded">
+                        <!-- Campos das parcelas aparecem aqui -->
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-end">
+                    <button type="submit" class="flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition">
+                        <ion-icon name="save-outline"></ion-icon>
+                        Salvar Promissória
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Modal: Registrar Pagamento -->
+    <div id="payment-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-40 p-4 overflow-y-auto">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative">
+            <button class="modal-close absolute top-3 right-3 text-gray-400 hover:text-gray-600">
+                <ion-icon name="close-circle-outline" class="text-3xl"></ion-icon>
+            </button>
+            <h3 class="text-2xl font-bold mb-6">Registrar Pagamento</h3>
+            
+            <form id="payment-form">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Selecione as parcelas a pagar:</label>
+                        <div id="payment-installments-list" class="mt-2 max-h-60 overflow-y-auto space-y-2 border border-gray-200 rounded-lg p-3">
+                            <!-- Lista de checkboxes das parcelas -->
+                        </div>
+                    </div>
+                    
+                    <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg text-center">
+                        <p class="text-sm font-medium text-blue-700">TOTAL A PAGAR</p>
+                        <p id="payment-total" class="text-3xl font-extrabold text-blue-600">R$ 0,00</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Data do Pagamento</label>
+                            <input type="date" name="paymentDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Forma de Pagamento</label>
+                            <select name="paymentMethod" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                                <option value="Pix">Pix</option>
+                                <option value="Dinheiro">Dinheiro</option>
+                                <option value="Cartão Débito">Cartão Débito</option>
+                                <option value="Cartão Crédito">Cartão Crédito</option>
+                                <option value="Outro">Outro</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-end">
+                    <button type="submit" class="flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-green-700 transition">
+                        <ion-icon name="checkmark-circle-outline"></ion-icon>
+                        Confirmar Pagamento
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Modal: Adicionar por Foto (OCR Simulado) -->
+    <div id="ocr-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-40 p-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative">
+            <button class="modal-close absolute top-3 right-3 text-gray-400 hover:text-gray-600">
+                <ion-icon name="close-circle-outline" class="text-3xl"></ion-icon>
+            </button>
+            <h3 class="text-2xl font-bold mb-2">Lançar por Foto (Simulação)</h3>
+            <p class="text-gray-600 mb-4">A IA "leu" a foto. Apenas confirme os dados abaixo.</p>
+            
+            <div class="p-4 rounded-lg bg-yellow-50 border border-yellow-300 mb-4">
+                <p class="font-semibold text-yellow-800">COMO FUNCIONA (NA VERSÃO FINAL):</p>
+                <p class="text-sm text-yellow-700">1. Você tira a foto da promissória.</p>
+                <p class="text-sm text-yellow-700">2. A IA lê os dados automaticamente.</p>
+                <p class="text-sm text-yellow-700">3. Você apenas confirma nesta tela.</p>
+            </div>
+            
+            <form id="ocr-form">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Valor (R$)</label>
+                        <input type="number" name="ocr_value" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Data Vencimento</label>
+                        <input type="date" name="ocr_dueDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Observações (Opcional)</label>
+                        <input type="text" name="ocr_notes" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3">
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-end">
+                    <button type="submit" class="flex items-center justify-center gap-2 bg-purple-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-purple-700 transition">
+                        <ion-icon name="save-outline"></ion-icon>
+                        Salvar Parcela
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+</body>
+</html>
