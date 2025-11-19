@@ -1,1307 +1,668 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BIALELE - Controle de Promissórias</title>
-    <!-- TailwindCSS via CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Ícones (Heroicons) -->
-    <script type="module" src="https://unpkg.com/ionicons@5.5.2/dist/ionicons/ionicons.esm.js"></script>
-    <script nomodule src="https://unpkg.com/ionicons@5.5.2/dist/ionicons/ionicons.js"></script>
-    <!-- Biblioteca PapaParse para CSV -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-
-    <style>
-        /* Fonte Inter (similar ao Inter) */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f4f7f6; /* Cor de fundo clara */
-        }
-        /* Ocultar elementos por padrão */
-        .hidden { display: none; }
-        /* Estilo para abas ativas */
-        .tab-active {
-            border-bottom-color: #3b82f6; /* Azul */
-            color: #3b82f6;
-            font-weight: 600;
-        }
-    </style>
-</head>
-<body class="antialiased text-gray-800">
-
-    <!-- Firebase SDKs (v11.6.1) -->
-    <script type="module">
-        // Importações do Firebase
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { 
-            getAuth, 
-            signInAnonymously, 
-            signInWithCustomToken, 
-            onAuthStateChanged,
-            setPersistence,
-            browserLocalPersistence
-        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { 
-            getFirestore, 
-            doc, 
-            getDoc, 
-            setDoc, 
-            addDoc, 
-            updateDoc, 
-            deleteDoc, 
-            onSnapshot, 
-            collection, 
-            query, 
-            where, 
-            getDocs,
-            Timestamp,
-            writeBatch,
-            setLogLevel // <-- CORREÇÃO: Removida a vírgula extra aqui
-        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- INÍCIO DA CONFIGURAÇÃO DO FIREBASE ---
-        // ATENÇÃO: Substitua pelo JSON de configuração do seu projeto Firebase
-        // Você pode obter isso no Console do Firebase > Configurações do Projeto
-        const firebaseConfigJson = typeof __firebase_config !== 'undefined' 
-            ? __firebase_config 
-            : '{ "apiKey": "SUA_API_KEY", "authDomain": "SEU_AUTH_DOMAIN", "projectId": "SEU_PROJECT_ID", "storageBucket": "SEU_STORAGE_BUCKET", "messagingSenderId": "SEU_SENDER_ID", "appId": "SEU_APP_ID" }';
-        
-        let firebaseConfig;
-        try {
-            firebaseConfig = JSON.parse(firebaseConfigJson);
-        } catch (e) {
-            console.error("Erro ao carregar configuração do Firebase:", e);
-            document.body.innerHTML = `<div class="p-4 text-center text-red-700 bg-red-100">Erro: Configuração do Firebase inválida. Verifique o objeto __firebase_config.</div>`;
-            // CORREÇÃO: Substituir 'return;' (ilegal no escopo global) 
-            // por 'throw new Error(...)' para interromper a execução do script.
-            throw new Error("Falha ao carregar a configuração do Firebase. Interrompendo o script.");
-        }
-
-        // Variáveis globais da aplicação
-        let app, auth, db, userId, currentView = 'clients';
-        let clientsCache = [];
-        let installmentsCache = [];
-        let currentClientId = null;
-        
-        // IDs dos elementos da UI
-        const ui = {
-            loader: document.getElementById('loader'),
-            appContainer: document.getElementById('app-container'),
-            clientsList: document.getElementById('clients-list'),
-            clientSearch: document.getElementById('client-search'),
-            addClientBtn: document.getElementById('add-client-btn'),
-            
-            // Modais
-            clientModal: document.getElementById('client-modal'),
-            clientModalTitle: document.getElementById('client-modal-title'),
-            clientForm: document.getElementById('client-form'),
-            deleteClientBtn: document.getElementById('delete-client-btn'),
-            
-            promissoryModal: document.getElementById('promissory-modal'),
-            promissoryForm: document.getElementById('promissory-form'),
-            installmentsContainer: document.getElementById('installments-container'),
-            
-            paymentModal: document.getElementById('payment-modal'),
-            paymentForm: document.getElementById('payment-form'),
-            paymentInstallmentsList: document.getElementById('payment-installments-list'),
-            paymentTotal: document.getElementById('payment-total'),
-            
-            ocrModal: document.getElementById('ocr-modal'),
-            ocrForm: document.getElementById('ocr-form'),
-            
-            // Tela do Cliente
-            clientDetailView: document.getElementById('client-detail-view'),
-            clientDetailName: document.getElementById('client-detail-name'),
-            clientDetailPhone: document.getElementById('client-detail-phone'),
-            clientDetailCpf: document.getElementById('client-detail-cpf'),
-            clientDetailNotes: document.getElementById('client-detail-notes'),
-            clientDetailTotalOpen: document.getElementById('client-detail-total-open'),
-            
-            openInstallmentsList: document.getElementById('open-installments-list'),
-            paidInstallmentsList: document.getElementById('paid-installments-list'),
-            tabOpen: document.getElementById('tab-open'),
-            tabPaid: document.getElementById('tab-paid'),
-
-            // Backup / Exportação
-            exportBtn: document.getElementById('export-btn'),
-            importBtn: document.getElementById('import-btn'),
-            importInput: document.getElementById('import-input'),
-            
-            // Botões de Navegação
-            backToClientsBtn: document.getElementById('back-to-clients-btn'),
-            
-            // Botões de Ação do Cliente
-            btnOpenAddPromissory: document.getElementById('btn-open-add-promissory'),
-            btnOpenAddOcr: document.getElementById('btn-open-add-ocr'),
-            btnOpenPayment: document.getElementById('btn-open-payment'),
-            btnEditClient: document.getElementById('btn-edit-client')
-        };
-
-        // --- INICIALIZAÇÃO E AUTENTICAÇÃO ---
-        
-        async function initializeAppAndAuth() {
-            try {
-                // Habilitar logs para debug
-                setLogLevel('Debug');
-                
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // Persistência local para manter o login
-                await setPersistence(auth, browserLocalPersistence);
-
-                console.log("App e Firestore inicializados.");
-                
-                // Monitorar estado da autenticação
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        console.log("Usuário autenticado:", userId);
-                        await loadInitialData();
-                    } else {
-                        console.log("Nenhum usuário logado. Tentando autenticação...");
-                        await attemptSignIn();
-                    }
-                });
-
-            } catch (error) {
-                console.error("Erro na inicialização:", error);
-                showError("Falha ao conectar com o banco de dados.");
-            }
-        }
-
-        async function attemptSignIn() {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    console.log("Tentando login com Custom Token...");
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    console.log("Tentando login anônimo...");
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Erro ao autenticar:", error);
-                showError("Falha na autenticação. Recarregue a página.");
-            }
-        }
-
-        // --- CARREGAMENTO DE DADOS (REALTIME) ---
-        
-        async function loadInitialData() {
-            if (!userId) {
-                console.warn("loadInitialData chamado sem userId.");
-                return;
-            }
-
-            ui.loader.classList.remove('hidden');
-            
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
-            
-            // Carregar Clientes (em tempo real)
-            const clientsQuery = query(collection(db, `artifacts/${appId}/users/${userId}/clients`));
-            onSnapshot(clientsQuery, (snapshot) => {
-                clientsCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                renderClientsList();
-                console.log("Clientes carregados:", clientsCache.length);
-            }, (error) => {
-                console.error("Erro ao carregar clientes:", error);
-                showError("Erro ao carregar clientes.");
-            });
-
-            // Carregar Parcelas (em tempo real)
-            const installmentsQuery = query(collection(db, `artifacts/${appId}/users/${userId}/installments`));
-            onSnapshot(installmentsQuery, (snapshot) => {
-                installmentsCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                // Se estiver na tela de um cliente, atualiza a visão dele
-                if (currentView === 'clientDetail' && currentClientId) {
-                    renderClientDetail(currentClientId);
-                }
-                console.log("Parcelas carregadas:", installmentsCache.length);
-            }, (error) => {
-                console.error("Erro ao carregar parcelas:", error);
-                showError("Erro ao carregar parcelas.");
-            });
-
-            ui.loader.classList.add('hidden');
-            ui.appContainer.classList.remove('hidden');
-        }
-
-        // --- RENDERIZAÇÃO DA UI ---
-
-        function renderClientsList() {
-            const searchTerm = ui.clientSearch.value.toLowerCase();
-            const filteredClients = clientsCache.filter(c => c.name.toLowerCase().includes(searchTerm));
-
-            // Ordenar por nome
-            filteredClients.sort((a, b) => a.name.localeCompare(b.name));
-
-            if (filteredClients.length === 0) {
-                ui.clientsList.innerHTML = `<li class="p-4 text-center text-gray-500">Nenhum cliente encontrado.</li>`;
-                return;
-            }
-
-            ui.clientsList.innerHTML = filteredClients.map(client => {
-                // Calcular dívida total do cliente
-                const totalDebt = installmentsCache
-                    .filter(i => i.clientId === client.id && i.status === 'open')
-                    .reduce((acc, i) => acc + i.value, 0);
-
-                return `
-                    <li class="border-b border-gray-200 last:border-b-0">
-                        <button data-id="${client.id}" class="w-full flex justify-between items-center p-4 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 transition duration-150">
-                            <div class="text-left">
-                                <p class="font-semibold text-lg text-gray-900">${client.name}</p>
-                                <p class="text-sm text-gray-600">${client.phone}</p>
-                            </div>
-                            <div class="text-right">
-                                <p class="font-bold text-lg ${totalDebt > 0 ? 'text-red-600' : 'text-green-600'}">
-                                    ${formatCurrency(totalDebt)}
-                                </p>
-                                <p class="text-xs text-gray-500">Total em Aberto</p>
-                            </div>
-                        </button>
-                    </li>
-                `;
-            }).join('');
-        }
-
-        function renderClientDetail(clientId) {
-            const client = clientsCache.find(c => c.id === clientId);
-            if (!client) {
-                showError("Cliente não encontrado.");
-                showView('clients');
-                return;
-            }
-
-            currentClientId = clientId; // Define o cliente atual globalmente
-
-            // Preencher dados básicos
-            ui.clientDetailName.textContent = client.name;
-            ui.clientDetailPhone.textContent = client.phone || 'Não informado';
-            ui.clientDetailCpf.textContent = client.cpf || 'Não informado';
-            ui.clientDetailNotes.textContent = client.notes || 'Nenhuma observação.';
-
-            // Filtrar parcelas
-            const clientInstallments = installmentsCache.filter(i => i.clientId === clientId);
-            
-            // Ordenar por data de vencimento (mais antiga primeiro)
-            clientInstallments.sort((a, b) => a.dueDate.toMillis() - b.dueDate.toMillis());
-
-            const openInstallments = clientInstallments.filter(i => i.status === 'open');
-            const paidInstallments = clientInstallments.filter(i => i.status === 'paid');
-
-            const totalOpen = openInstallments.reduce((acc, i) => acc + i.value, 0);
-            ui.clientDetailTotalOpen.textContent = formatCurrency(totalOpen);
-
-            // Renderizar listas
-            renderInstallmentList(ui.openInstallmentsList, openInstallments, 'open');
-            renderInstallmentList(ui.paidInstallmentsList, paidInstallments, 'paid');
-
-            // Mostrar view
-            showView('clientDetail');
-            // Garantir que a aba "Em Aberto" seja a padrão
-            showTab('open');
-        }
-
-        function renderInstallmentList(element, installments, type) {
-            if (installments.length === 0) {
-                element.innerHTML = `<li class="p-4 text-center text-gray-500">Nenhuma parcela ${type === 'open' ? 'em aberto' : 'paga'}.</li>`;
-                return;
-            }
-
-            element.innerHTML = installments.map(item => {
-                const dueDate = item.dueDate.toDate();
-                const isOverdue = type === 'open' && dueDate < new Date();
-                
-                return `
-                    <li class="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg mb-2 shadow-sm">
-                        <div>
-                            <p class="font-semibold text-gray-800">${formatCurrency(item.value)}</p>
-                            <p class="text-sm ${isOverdue ? 'text-red-600 font-medium' : 'text-gray-600'}">
-                                Venc: ${formatDate(dueDate)} ${isOverdue ? '(Vencida)' : ''}
-                            </p>
-                            ${item.notes ? `<p class="text-xs text-gray-500 italic">Obs: ${item.notes}</p>` : ''}
-                        </div>
-                        ${type === 'open' ? `
-                        <button data-id="${item.id}" class="btn-pay-single text-xs bg-blue-500 text-white px-3 py-1 rounded-full hover:bg-blue-600 transition">
-                            Pagar
-                        </button>
-                        ` : `
-                        <div class="text-right text-xs">
-                            <p class="text-green-600 font-medium">Pago em:</p>
-                            <p class="text-gray-600">${item.paidAt ? formatDate(item.paidAt.toDate()) : '-'}</p>
-                            <p class="text-gray-500">${item.paymentMethod || ''}</p>
-                        </div>
-                        `}
-                    </li>
-                `;
-            }).join('');
-        }
-        
-        // --- GERENCIAMENTO DE VIEWS E MODAIS ---
-
-        function showView(viewName) {
-            currentView = viewName;
-            document.getElementById('clients-view').classList.toggle('hidden', viewName !== 'clients');
-            document.getElementById('client-detail-view').classList.toggle('hidden', viewName !== 'clientDetail');
-        }
-
-        function showModal(modalElement, reset = true) {
-            if (reset) {
-                modalElement.querySelectorAll('form').forEach(form => form.reset());
-            }
-            // Limpar formulários específicos
-            if (modalElement === ui.promissoryModal) {
-                ui.installmentsContainer.innerHTML = '';
-            }
-            if (modalElement === ui.paymentModal) {
-                ui.paymentInstallmentsList.innerHTML = '';
-                ui.paymentTotal.textContent = formatCurrency(0);
-            }
-
-            modalElement.classList.remove('hidden');
-        }
-
-        function closeModal(modalElement) {
-            modalElement.classList.add('hidden');
-        }
-
-        function showTab(tabName) {
-            // Abas
-            ui.tabOpen.classList.toggle('tab-active', tabName === 'open');
-            ui.tabPaid.classList.toggle('tab-active', tabName === 'paid');
-            
-            // Conteúdo
-            document.getElementById('open-installments-content').classList.toggle('hidden', tabName !== 'open');
-            document.getElementById('paid-installments-content').classList.toggle('hidden', tabName !== 'paid');
-        }
-
-        // --- LÓGICA DE NEGÓCIO (CRUD) ---
-
-        // Salvar Cliente (Criar ou Editar)
-        async function handleSaveClient(e) {
-            e.preventDefault(); // Prevenir envio do formulário
-            const formData = new FormData(ui.clientForm);
-            const clientId = formData.get('clientId');
-            
-            const clientData = {
-                name: formData.get('name'),
-                phone: formData.get('phone'),
-                cpf: formData.get('cpf'),
-                notes: formData.get('notes'),
-            };
-
-            // Validação
-            if (!clientData.name || !clientData.phone) {
-                showError("Nome e Telefone são obrigatórios.");
-                return;
-            }
-
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
-            ui.loader.classList.remove('hidden');
-            
-            try {
-                let docRef;
-                if (clientId) {
-                    // Editando
-                    docRef = doc(db, `artifacts/${appId}/users/${userId}/clients`, clientId);
-                    await updateDoc(docRef, clientData);
-                    showSuccess("Cliente atualizado com sucesso!");
-                } else {
-                    // Criando
-                    clientData.createdAt = Timestamp.now();
-                    docRef = collection(db, `artifacts/${appId}/users/${userId}/clients`);
-                    await addDoc(docRef, clientData);
-                    showSuccess("Cliente cadastrado com sucesso!");
-                }
-                closeModal(ui.clientModal);
-            } catch (error) {
-                console.error("Erro ao salvar cliente:", error);
-                showError("Erro ao salvar cliente.");
-            } finally {
-                ui.loader.classList.add('hidden');
-            }
-        }
-        
-        // Deletar Cliente (com confirmação)
-        async function handleDeleteClient() {
-            // ATENÇÃO: Substituir por um modal customizado, pois window.confirm não funciona.
-            // Esta é uma simulação de confirmação.
-            const confirmation = prompt("Tem certeza que deseja excluir este cliente? Isso NÃO excluirá as parcelas, mas o desvinculará. Digite 'EXCLUIR' para confirmar.");
-            
-            if (confirmation !== 'EXCLUIR') {
-                showError("Exclusão cancelada.");
-                return;
-            }
-
-            const clientId = ui.clientForm.elements.clientId.value;
-            if (!clientId) return;
-
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
-            ui.loader.classList.remove('hidden');
-            
-            try {
-                // A regra é NÃO excluir parcelas, apenas o cliente.
-                // As parcelas ficarão "órfãs", mas ainda no histórico.
-                // Uma lógica melhor seria arquivar o cliente (adicionar `status: 'archived'`)
-                
-                await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/clients`, clientId));
-                showSuccess("Cliente excluído.");
-                closeModal(ui.clientModal);
-                showView('clients');
-            } catch (error) {
-                console.error("Erro ao excluir cliente:", error);
-                showError("Erro ao excluir cliente.");
-            } finally {
-                ui.loader.classList.add('hidden');
-            }
-        }
-
-        // Gerar campos de data para parcelas
-        function generateInstallmentFields() {
-            const totalValue = parseFloat(ui.promissoryForm.elements.totalValue.value);
-            const numInstallments = parseInt(ui.promissoryForm.elements.numInstallments.value);
-            const firstDueDate = ui.promissoryForm.elements.firstDueDate.value;
-            
-            ui.installmentsContainer.innerHTML = '';
-            
-            if (!totalValue || !numInstallments || !firstDueDate) {
-                showError("Preencha Valor, Nº de Parcelas e 1º Vencimento.");
-                return;
-            }
-            
-            const valuePerInstallment = (totalValue / numInstallments).toFixed(2);
-            let currentDate = new Date(firstDueDate + 'T12:00:00'); // Tratar como meio-dia local
-
-            let fieldsHtml = '';
-            for (let i = 1; i <= numInstallments; i++) {
-                fieldsHtml += `
-                    <div class="grid grid-cols-2 gap-2 mb-2 p-2 border rounded">
-                        <p class="col-span-2 font-semibold">Parcela ${i} de ${numInstallments}</p>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Valor (R$)</label>
-                            <input type="number" name="inst_value_${i}" value="${valuePerInstallment}" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" required>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Vencimento</label>
-                            <input type="date" name="inst_date_${i}" value="${currentDate.toISOString().split('T')[0]}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" required>
-                        </div>
-                    </div>
-                `;
-                // Adiciona um mês para a próxima parcela
-                currentDate.setMonth(currentDate.getMonth() + 1);
-            }
-            ui.installmentsContainer.innerHTML = fieldsHtml;
-        }
-
-        // Salvar Nova Promissória (Múltiplas Parcelas)
-        async function handleSavePromissory(e) {
-            e.preventDefault();
-            if (!currentClientId) return;
-
-            const client = clientsCache.find(c => c.id === currentClientId);
-            if (!client) return;
-            
-            const form = new FormData(ui.promissoryForm);
-            const numInstallments = parseInt(form.get('numInstallments'));
-            const notes = form.get('notes') || '';
-            const purchaseId = crypto.randomUUID(); // ID único para esta compra
-            
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
-            ui.loader.classList.remove('hidden');
-
-            try {
-                const batch = writeBatch(db);
-                
-                for (let i = 1; i <= numInstallments; i++) {
-                    const value = parseFloat(form.get(`inst_value_${i}`));
-                    const dateStr = form.get(`inst_date_${i}`);
-                    
-                    if (!value || !dateStr) {
-                        throw new Error(`Dados inválidos para parcela ${i}`);
-                    }
-                    
-                    const dueDate = Timestamp.fromDate(new Date(dateStr + 'T12:00:00'));
-
-                    const newInstallmentRef = doc(collection(db, `artifacts/${appId}/users/${userId}/installments`));
-                    batch.set(newInstallmentRef, {
-                        clientId: currentClientId,
-                        clientName: client.name,
-                        value: value,
-                        dueDate: dueDate,
-                        status: 'open',
-                        notes: notes,
-                        createdAt: Timestamp.now(),
-                        code: `${client.name.substring(0, 3).toUpperCase()}-${Date.now().toString().slice(-4)}${i}`,
-                        totalPurchaseId: purchaseId,
-                        installmentNumber: i,
-                        totalInstallments: numInstallments,
-                    });
-                }
-                
-                await batch.commit();
-                showSuccess("Promissória e parcelas registradas!");
-                closeModal(ui.promissoryModal);
-                
-            } catch (error) {
-                console.error("Erro ao salvar promissória:", error);
-                showError("Erro ao salvar parcelas. Verifique os dados.");
-            } finally {
-                ui.loader.classList.add('hidden');
-            }
-        }
-        
-        // Salvar Pagamento (Múltiplas Parcelas)
-        async function handleSavePayment(e) {
-            e.preventDefault();
-            if (!currentClientId) return;
-            
-            const form = new FormData(ui.paymentForm);
-            const paymentDate = Timestamp.fromDate(new Date(form.get('paymentDate') + 'T12:00:00'));
-            const paymentMethod = form.get('paymentMethod');
-            const selectedIds = Array.from(ui.paymentInstallmentsList.querySelectorAll('input[type=checkbox]:checked'))
-                                     .map(input => input.value);
-            
-            if (selectedIds.length === 0) {
-                showError("Selecione ao menos uma parcela para pagar.");
-                return;
-            }
-            
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
-            ui.loader.classList.remove('hidden');
-            
-            try {
-                const batch = writeBatch(db);
-                
-                for (const id of selectedIds) {
-                    const docRef = doc(db, `artifacts/${appId}/users/${userId}/installments`, id);
-                    batch.update(docRef, {
-                        status: 'paid',
-                        paidAt: paymentDate,
-                        paymentMethod: paymentMethod
-                    });
-                }
-                
-                await batch.commit();
-                showSuccess("Pagamento registrado com sucesso!");
-                closeModal(ui.paymentModal);
-                
-            } catch (error) {
-                console.error("Erro ao registrar pagamento:", error);
-                showError("Erro ao registrar pagamento.");
-            } finally {
-                ui.loader.classList.add('hidden');
-            }
-        }
-
-        // --- SIMULAÇÃO DE OCR ---
-        
-        // Salva a parcela "lida" pela IA (simulada)
-        async function handleSaveOcr(e) {
-            e.preventDefault();
-            if (!currentClientId) return;
-
-            const client = clientsCache.find(c => c.id === currentClientId);
-            if (!client) return;
-
-            const form = new FormData(ui.ocrForm);
-            const value = parseFloat(form.get('ocr_value'));
-            const dateStr = form.get('ocr_dueDate');
-            const notes = form.get('ocr_notes') || 'Lançado via Foto (Simulado)';
-
-            if (!value || !dateStr) {
-                showError("Valor e Vencimento são obrigatórios.");
-                return;
-            }
-
-            const dueDate = Timestamp.fromDate(new Date(dateStr + 'T12:00:00'));
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
-            ui.loader.classList.remove('hidden');
-
-            try {
-                const docRef = collection(db, `artifacts/${appId}/users/${userId}/installments`);
-                await addDoc(docRef, {
-                    clientId: currentClientId,
-                    clientName: client.name,
-                    value: value,
-                    dueDate: dueDate,
-                    status: 'open',
-                    notes: notes,
-                    createdAt: Timestamp.now(),
-                    code: `${client.name.substring(0, 3).toUpperCase()}-OCR-${Date.now().toString().slice(-4)}`,
-                    totalPurchaseId: crypto.randomUUID(),
-                    installmentNumber: 1,
-                    totalInstallments: 1,
-                });
-                
-                showSuccess("Parcela (via foto) registrada!");
-                closeModal(ui.ocrModal);
-
-            } catch (error) {
-                console.error("Erro ao salvar parcela OCR:", error);
-                showError("Erro ao salvar parcela.");
-            } finally {
-                ui.loader.classList.add('hidden');
-            }
-        }
-        
-        // --- HANDLERS DE EVENTOS DA UI ---
-
-        function setupEventListeners() {
-            // Filtro de Clientes
-            ui.clientSearch.addEventListener('input', renderClientsList);
-            
-            // Abrir Modal de Novo Cliente
-            ui.addClientBtn.addEventListener('click', () => {
-                ui.clientForm.reset();
-                ui.clientForm.elements.clientId.value = '';
-                ui.clientModalTitle.textContent = "Cadastrar Novo Cliente";
-                ui.deleteClientBtn.classList.add('hidden');
-                showModal(ui.clientModal);
-            });
-            
-            // Abrir Cliente (clicando na lista)
-            ui.clientsList.addEventListener('click', e => {
-                const button = e.target.closest('button[data-id]');
-                if (button) {
-                    renderClientDetail(button.dataset.id);
-                }
-            });
-            
-            // Voltar para lista de clientes
-            ui.backToClientsBtn.addEventListener('click', () => showView('clients'));
-
-            // Salvar Cliente (Form)
-            ui.clientForm.addEventListener('submit', handleSaveClient);
-            
-            // Deletar Cliente
-            ui.deleteClientBtn.addEventListener('click', handleDeleteClient);
-            
-            // Abas da Tela do Cliente
-            ui.tabOpen.addEventListener('click', () => showTab('open'));
-            ui.tabPaid.addEventListener('click', () => showTab('paid'));
-            
-            // Botões de Ação do Cliente
-            ui.btnEditClient.addEventListener('click', () => {
-                const client = clientsCache.find(c => c.id === currentClientId);
-                if (!client) return;
-                
-                ui.clientForm.elements.clientId.value = client.id;
-                ui.clientForm.elements.name.value = client.name;
-                ui.clientForm.elements.phone.value = client.phone;
-                ui.clientForm.elements.cpf.value = client.cpf;
-                ui.clientForm.elements.notes.value = client.notes;
-                
-                ui.clientModalTitle.textContent = "Editar Cliente";
-                ui.deleteClientBtn.classList.remove('hidden');
-                showModal(ui.clientModal, false); // Não reseta o form
-            });
-            
-            ui.btnOpenAddPromissory.addEventListener('click', () => {
-                showModal(ui.promissoryModal);
-            });
-            
-            ui.btnOpenAddOcr.addEventListener('click', () => {
-                // Simulação de OCR: A "IA" "leu" a foto e preencheu o form.
-                // Na vida real, aqui você faria o upload, chamaria a Cloud Function
-                // e receberia os dados de volta.
-                const form = ui.ocrForm;
-                form.reset();
-                form.elements.ocr_value.value = Math.floor(Math.random() * 200) + 50; // Valor aleatório
-                let d = new Date();
-                d.setMonth(d.getMonth() + 1);
-                form.elements.ocr_dueDate.value = d.toISOString().split('T')[0]; // Mês que vem
-                
-                showModal(ui.ocrModal, false);
-            });
-            
-            ui.btnOpenPayment.addEventListener('click', () => {
-                // Carregar parcelas em aberto no modal de pagamento
-                const openInstallments = installmentsCache
-                    .filter(i => i.clientId === currentClientId && i.status === 'open')
-                    .sort((a, b) => a.dueDate.toMillis() - b.dueDate.toMillis());
-                
-                if (openInstallments.length === 0) {
-                    showError("Este cliente não possui parcelas em aberto.");
-                    return;
-                }
-                
-                ui.paymentInstallmentsList.innerHTML = openInstallments.map(item => `
-                    <label class="flex items-center justify-between p-3 bg-gray-50 border rounded-md mb-2 cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-400">
-                        <div class="flex items-center">
-                            <input type="checkbox" name="installments" value="${item.id}" class="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 payment-checkbox">
-                            <div class="ml-3">
-                                <p class="font-semibold text-gray-800">${formatCurrency(item.value)}</p>
-                                <p class="text-sm text-gray-600">Venc: ${formatDate(item.dueDate.toDate())}</p>
-                            </div>
-                        </div>
-                    </label>
-                `).join('');
-                
-                // Setar data de pagamento para hoje
-                ui.paymentForm.elements.paymentDate.value = new Date().toISOString().split('T')[0];
-                updatePaymentTotal();
-                showModal(ui.paymentModal);
-            });
-            
-            // Pagar Parcela Única (da lista)
-            ui.openInstallmentsList.addEventListener('click', e => {
-                const button = e.target.closest('.btn-pay-single');
-                if (button) {
-                    const installmentId = button.dataset.id;
-                    const installment = installmentsCache.find(i => i.id === installmentId);
-                    
-                    // Simular abertura do modal de pagamento com esta parcela selecionada
-                    ui.btnOpenPayment.click();
-                    
-                    // Marcar a parcela específica
-                    const checkbox = ui.paymentInstallmentsList.querySelector(`input[value="${installmentId}"]`);
-                    if (checkbox) {
-                        checkbox.checked = true;
-                        updatePaymentTotal();
-                    }
-                }
-            });
-            
-            // Atualizar total no modal de pagamento
-            ui.paymentInstallmentsList.addEventListener('change', updatePaymentTotal);
-
-            // Gerar Parcelas (Form Promissória)
-            ui.promissoryForm.elements.generateFieldsBtn.addEventListener('click', generateInstallmentFields);
-
-            // Salvar Forms
-            ui.promissoryForm.addEventListener('submit', handleSavePromissory);
-            ui.paymentForm.addEventListener('submit', handleSavePayment);
-            ui.ocrForm.addEventListener('submit', handleSaveOcr);
-
-            // Fechar Modais
-            document.querySelectorAll('.modal-close').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    closeModal(btn.closest('.modal'));
-                });
-            });
-
-            // Exportação / Importação
-            ui.exportBtn.addEventListener('click', exportDataToCSV);
-            ui.importBtn.addEventListener('click', () => ui.importInput.click());
-            ui.importInput.addEventListener('change', handleImportCSV);
-        }
-        
-        // Atualiza o total a pagar no modal de pagamento
-        function updatePaymentTotal() {
-            const selectedIds = Array.from(ui.paymentInstallmentsList.querySelectorAll('input:checked')).map(i => i.value);
-            const total = selectedIds.reduce((acc, id) => {
-                const item = installmentsCache.find(i => i.id === id);
-                return acc + (item ? item.value : 0);
-            }, 0);
-            ui.paymentTotal.textContent = formatCurrency(total);
-        }
-        
-        // --- IMPORTAÇÃO E EXPORTAÇÃO (CSV) ---
-        
-        async function exportDataToCSV() {
-            showSuccess("Exportando dados... Isso pode levar um momento.");
-            
-            // 1. Clientes
-            const clientsData = clientsCache.map(c => ({
-                id: c.id,
-                name: c.name,
-                phone: c.phone,
-                cpf: c.cpf,
-                notes: c.notes,
-                createdAt: c.createdAt ? c.createdAt.toDate().toISOString() : '',
-            }));
-            
-            // 2. Parcelas
-            // Precisamos garantir que temos TODAS as parcelas, não apenas o cache
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
-            const allInstallmentsQuery = query(collection(db, `artifacts/${appId}/users/${userId}/installments`));
-            const snapshot = await getDocs(allInstallmentsQuery);
-            const allInstallments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-            const installmentsData = allInstallments.map(i => ({
-                id: i.id,
-                clientId: i.clientId,
-                clientName: i.clientName,
-                value: i.value,
-                dueDate: i.dueDate ? i.dueDate.toDate().toISOString() : '',
-                status: i.status,
-                notes: i.notes,
-                createdAt: i.createdAt ? i.createdAt.toDate().toISOString() : '',
-                code: i.code,
-                totalPurchaseId: i.totalPurchaseId,
-                installmentNumber: i.installmentNumber,
-                totalInstallments: i.totalInstallments,
-                paidAt: i.paidAt ? i.paidAt.toDate().toISOString() : '',
-                paymentMethod: i.paymentMethod,
-            }));
-
-            // Gerar e baixar CSVs
-            downloadCSV(Papa.unparse(clientsData), 'bialele_clientes.csv');
-            downloadCSV(Papa.unparse(installmentsData), 'bialele_parcelas.csv');
-        }
-
-        function downloadCSV(csvString, filename) {
-            const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', filename);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-
-        function handleImportCSV(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            // Simulação de confirmação
-            const confirmation = prompt(`Tem certeza que quer importar o arquivo "${file.name}"? Isso pode sobrescrever dados. Digite 'IMPORTAR'.`);
-            if (confirmation !== 'IMPORTAR') {
-                event.target.value = null; // Limpa o input
-                return;
-            }
-
-            Papa.parse(file, {
-                header: true,
-                skipEmptyLines: true,
-                complete: async (results) => {
-                    if (file.name.includes('clientes')) {
-                        await importData('clients', results.data);
-                    } else if (file.name.includes('parcelas')) {
-                        await importData('installments', results.data);
-                    } else {
-                        showError("Nome de arquivo não reconhecido. Use 'bialele_clientes.csv' ou 'bialele_parcelas.csv'.");
-                    }
-                    event.target.value = null; // Limpa o input
-                },
-                error: (err) => {
-                    showError("Erro ao ler o arquivo CSV: " + err.message);
-                    event.target.value = null;
-                }
-            });
-        }
-        
-        async function importData(collectionName, data) {
-            if (!data || data.length === 0) {
-                showError("Arquivo CSV vazio ou inválido.");
-                return;
-            }
-            
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'bialele-default';
-            ui.loader.classList.remove('hidden');
-            
-            try {
-                const batch = writeBatch(db);
-                let counter = 0;
-                
-                for (const item of data) {
-                    if (!item.id) continue; // Precisa de ID para restaurar
-                    
-                    let docRef = doc(db, `artifacts/${appId}/users/${userId}/${collectionName}`, item.id);
-                    let processedItem = { ...item };
-
-                    // Converter datas de string ISO para Timestamps
-                    const dateFields = ['createdAt', 'dueDate', 'paidAt'];
-                    dateFields.forEach(field => {
-                        if (processedItem[field]) {
-                            processedItem[field] = Timestamp.fromDate(new Date(processedItem[field]));
-                        }
-                    });
-
-                    // Converter valores numéricos
-                    const numericFields = ['value', 'installmentNumber', 'totalInstallments'];
-                    numericFields.forEach(field => {
-                        if (processedItem[field]) {
-                            processedItem[field] = parseFloat(processedItem[field]);
-                        }
-                    });
-
-                    batch.set(docRef, processedItem); // Usar set() para sobrescrever
-                    counter++;
-                    
-                    // O Firestore Batch tem limite de 500 operações
-                    if (counter % 499 === 0) {
-                        await batch.commit();
-                        batch = writeBatch(db); // Inicia novo batch
-                    }
-                }
-                
-                await batch.commit(); // Commita o restante
-                showSuccess(`Importação de ${collectionName} concluída! ${counter} registros processados.`);
-                
-            } catch (error) {
-                console.error("Erro na importação:", error);
-                showError("Erro grave durante a importação.");
-            } finally {
-                ui.loader.classList.add('hidden');
-            }
-        }
-
-        // --- UTILITÁRIOS ---
-        
-        function formatCurrency(value) {
-            return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-        }
-
-        function formatDate(date) {
-            return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' }); // UTC para evitar bugs de fuso
-        }
-
-        function showSuccess(message) {
-            // Implementar um toast/snackbar customizado
-            console.log("SUCESSO:", message);
-            // Simples simulação de toast
-            const toast = document.createElement('div');
-            toast.className = 'fixed top-5 right-5 bg-green-500 text-white p-3 rounded-lg shadow-lg z-50';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
-        }
-
-        function showError(message) {
-            // Implementar um toast/snackbar customizado
-            console.error("ERRO:", message);
-            // Simples simulação de toast de erro
-            const toast = document.createElement('div');
-            toast.className = 'fixed top-5 right-5 bg-red-600 text-white p-3 rounded-lg shadow-lg z-50';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 4000);
-        }
-        
-        // --- INICIALIZAÇÃO DA APLICAÇÃO ---
-        document.addEventListener('DOMContentLoaded', () => {
-            setupEventListeners();
-            initializeAppAndAuth();
-        });
-
-    </script>
-
-    <!-- Loader Global -->
-    <div id="loader" class="fixed inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50">
-        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-600"></div>
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  BookOpen, Heart, Star, Trophy, Plus, Settings, Check, X, 
+  MessageSquare, Loader2, ArrowLeft, Home, Layers, 
+  Lightbulb, User, Zap, Lock, Award, Upload, LogIn, UserPlus,
+  Feather, Sun, Shield, Sword, Flame, Ghost, RefreshCw, HelpCircle, FileText,
+  ChevronRight // Adicionado aqui para corrigir o ReferenceError
+} from 'lucide-react';
+
+// ====================================================================
+// --- CONFIGURAÇÃO E DADOS (Baseado em "O Livro de Slamer") ---
+// ====================================================================
+
+const APP_NAME = "SlamerPath";
+
+const INITIAL_USERS = [
+  { username: 'admin', password: '123', name: 'Rodrigo Gomes', email: 'autor@slamer.com', isAdmin: true },
+  { username: 'peter', password: '123', name: 'Peter Richt', email: 'peter@inaira.com' }
+];
+
+const MOCK_BOOKS = [
+  { 
+    id: 'slamer_book', 
+    title: 'O Livro de Slamer', 
+    author: 'Rodrigo Gomes', 
+    progress: 0, 
+    icon: Feather, 
+    color: '#EAB308', 
+    isStarter: true
+  }
+];
+
+// Mapeamento das 6 Fases com 6 Jogos Diferentes
+const MAP_STRUCTURE = [
+  { id: 'm1', title: 'Solcris: O Convite', phases: 1, gameType: 'Quiz', description: "O início da jornada." }, 
+  { id: 'm2', title: 'A Orla de Slamer', phases: 1, gameType: 'Memory', description: "Conheça seus aliados." },
+  { id: 'm3', title: 'Luminírios & Denísia', phases: 1, gameType: 'DragAndDrop', description: "Encontre os objetos de poder." },
+  { id: 'm4', title: 'O Primeiro Encanto', phases: 1, gameType: 'SpellTyper', description: "Lance feitiços contra as plantas!" },
+  { id: 'm5', title: 'Krotons e Cruhell', phases: 1, gameType: 'Battle', description: "Batalha final contra as sombras." },
+  { id: 'm6', title: 'Epílogo: A Página Rasgada', phases: 1, gameType: 'Unscramble', description: "Restaure a mensagem final." },
+];
+
+// --- DADOS DOS JOGOS ---
+
+// 1. Quiz
+const QUIZ_DATA = {
+    question: "Qual o nome do fenômeno que transportou Peter e Débora para Inária?",
+    options: ["Solcris", "Eclipse Lunar", "Tempestade Solar", "Buraco Negro"],
+    correctAnswer: "Solcris",
+    hint: "Ocorre quando o círculo de transporte é ativado pela luz."
+};
+
+// 2. Drag & Drop (Conexões)
+const DRAG_DATA = {
+    pairs: [
+      { id: 1, target: "Átila", description: "Guardião" },
+      { id: 2, target: "Slamer", description: "Criador do Livro" },
+      { id: 3, target: "Órion", description: "Reino Sombrio" },
+      { id: 4, target: "Inária", description: "Terra de Luz" },
+    ],
+    sources: [
+        { id: 1, content: "Guardião" },
+        { id: 2, content: "Terra de Luz" },
+        { id: 3, content: "Criador do Livro" },
+        { id: 4, content: "Reino Sombrio" },
+    ]
+};
+
+// 3. Memory Game (Aliados)
+const MEMORY_CARDS = [
+    { id: 1, icon: User, name: "Peter" },
+    { id: 2, icon: Sun, name: "Débora" }, // Débora tem o brilho/pó de estrela
+    { id: 3, icon: Shield, name: "Soltesner" }, // Guerreiro
+    { id: 4, icon: Feather, name: "Ária" }, // Feiticeira (pena/leveza)
+    { id: 5, icon: Ghost, name: "Marley" }, // O "Imortal"
+    { id: 6, icon: Sword, name: "Slamer" }, // O Mago original
+];
+
+// 4. Spell Typer (Feitiços)
+const SPELL_DATA = [
+    { spell: "Susccipio", meaning: "A primeira palavra do livro." },
+    { spell: "Incêndio Illu Aere", meaning: "Fogo azul contra as plantas." },
+    { spell: "Naturae Imperium", meaning: "Comando da natureza." }
+];
+
+// 5. Battle (Combate Simples)
+const BATTLE_DATA = {
+    enemyName: "Cruhell",
+    enemyMaxHp: 100,
+    playerMaxHp: 100
+};
+
+// 6. Unscramble (Restaurar Texto)
+const PUZZLE_DATA = {
+    correctOrder: [
+        "Quando fundi o livro",
+        "ao meu corpo,",
+        "ele se tornou",
+        "parte de mim."
+    ],
+    scrambled: [
+        { id: 'p3', text: "ele se tornou" },
+        { id: 'p1', text: "Quando fundi o livro" },
+        { id: 'p4', text: "parte de mim." },
+        { id: 'p2', text: "ao meu corpo," },
+    ]
+};
+
+// ====================================================================
+// --- COMPONENTES UI REUTILIZÁVEIS ---
+// ====================================================================
+
+const HeartsDisplay = ({ count }) => (
+  <div className="flex items-center space-x-1 px-3 py-1 bg-red-50 border border-red-100 rounded-full">
+    <Heart className="w-4 h-4 text-red-500 fill-red-500" />
+    <span className="font-bold text-red-700 text-sm">{count}</span>
+  </div>
+);
+
+const Modal = ({ title, children, onClose, color = "blue" }) => (
+  <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-[100] p-4 backdrop-blur-sm animate-in fade-in">
+    <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md transform transition-all scale-100">
+      <h3 className={`text-xl font-black text-${color}-600 mb-4 uppercase tracking-wide`}>{title}</h3>
+      <div className="text-slate-600 mb-6 font-medium">{children}</div>
+      <button onClick={onClose} className={`w-full py-3 bg-${color}-500 text-white font-bold rounded-xl hover:bg-${color}-600 transition shadow-lg shadow-${color}-200`}>
+        Continuar
+      </button>
     </div>
+  </div>
+);
 
-    <!-- Container Principal da Aplicação -->
-    <div id="app-container" class="max-w-4xl mx-auto p-4 hidden">
+// ====================================================================
+// --- JOGOS (GAME COMPONENTS) ---
+// ====================================================================
 
-        <!-- Cabeçalho -->
-        <header class="mb-6 pb-4 border-b border-gray-300">
-            <h1 class="text-3xl font-bold text-gray-900">BIALELE - Controle de Promissórias</h1>
-            <p class="text-gray-600">Gestão simplificada de vendas parceladas.</p>
-        </header>
+// JOGO 1: QUIZ (Já existente)
+const QuizGame = ({ onComplete, onMistake }) => {
+    const [selected, setSelected] = useState(null);
+    const [feedback, setFeedback] = useState(null);
 
-        <!-- (VIEW 1) Lista de Clientes (Dashboard) -->
-        <div id="clients-view">
-            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-3">
-                <div class="relative w-full sm:w-auto flex-grow">
-                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <ion-icon name="search-outline" class="text-gray-400"></ion-icon>
+    const handleConfirm = () => {
+        if (!selected) return;
+        const isCorrect = selected === QUIZ_DATA.correctAnswer;
+        setFeedback(isCorrect ? 'correct' : 'wrong');
+        if (!isCorrect) onMistake();
+        setTimeout(() => { if (isCorrect) onComplete(); else { setSelected(null); setFeedback(null); } }, 1500);
+    };
+
+    return (
+        <div className="p-6 h-full flex flex-col">
+            <div className="mb-6">
+                <span className="text-xs font-bold text-blue-500 uppercase">Desafio de Conhecimento</span>
+                <h2 className="text-xl font-bold text-slate-800 mt-2">{QUIZ_DATA.question}</h2>
+            </div>
+            <div className="space-y-3 flex-grow">
+                {QUIZ_DATA.options.map((opt, idx) => (
+                    <button key={idx} onClick={() => !feedback && setSelected(opt)} 
+                        className={`w-full p-4 rounded-xl text-left font-bold border-2 transition-all ${feedback === 'correct' && opt === QUIZ_DATA.correctAnswer ? 'bg-green-100 border-green-500 text-green-700' : feedback === 'wrong' && selected === opt ? 'bg-red-100 border-red-500 text-red-700' : selected === opt ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        {opt}
+                    </button>
+                ))}
+            </div>
+            {feedback === 'wrong' && <p className="text-center text-red-500 font-bold mb-2 text-sm">{QUIZ_DATA.hint}</p>}
+            <button onClick={handleConfirm} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl">Confirmar</button>
+        </div>
+    );
+};
+
+// JOGO 2: MEMÓRIA (Corrigido)
+const MemoryGame = ({ onComplete }) => {
+    const [cards, setCards] = useState([]);
+    const [flipped, setFlipped] = useState([]);
+    const [matched, setMatched] = useState([]);
+
+    useEffect(() => {
+        // Duplicar e embaralhar
+        const deck = [...MEMORY_CARDS, ...MEMORY_CARDS]
+            .sort(() => Math.random() - 0.5)
+            .map((card, index) => ({ ...card, uniqueId: index }));
+        setCards(deck);
+    }, []);
+
+    const handleCardClick = (id) => {
+        if (flipped.length === 2 || flipped.includes(id) || matched.includes(cards.find(c => c.uniqueId === id).id)) return;
+        
+        const newFlipped = [...flipped, id];
+        setFlipped(newFlipped);
+
+        if (newFlipped.length === 2) {
+            const card1 = cards.find(c => c.uniqueId === newFlipped[0]);
+            const card2 = cards.find(c => c.uniqueId === newFlipped[1]);
+            
+            if (card1.id === card2.id) {
+                setMatched([...matched, card1.id]);
+                setFlipped([]);
+                if (matched.length + 1 === MEMORY_CARDS.length) setTimeout(onComplete, 1000);
+            } else {
+                setTimeout(() => setFlipped([]), 1000);
+            }
+        }
+    };
+
+    return (
+        <div className="p-4 h-full flex flex-col">
+            <h2 className="text-center font-black text-slate-700 mb-4">Encontre os Pares da Orla</h2>
+            <div className="grid grid-cols-3 gap-3 flex-grow content-center">
+                {cards.map((card) => {
+                    const isFlipped = flipped.includes(card.uniqueId) || matched.includes(card.id);
+                    // CORREÇÃO: Atribuir o ícone a uma variável capitalizada para o React entender como componente
+                    const IconComponent = card.icon;
+                    
+                    return (
+                        <button key={card.uniqueId} onClick={() => handleCardClick(card.uniqueId)} 
+                            className={`aspect-square rounded-xl flex items-center justify-center transition-all duration-500 transform ${isFlipped ? 'bg-yellow-400 rotate-0' : 'bg-slate-200 rotate-y-180'}`}>
+                            {isFlipped ? (
+                                <div className="flex flex-col items-center animate-in zoom-in">
+                                    <IconComponent size={24} className="text-white mb-1" />
+                                    <span className="text-[10px] font-bold text-yellow-900 uppercase">{card.name}</span>
+                                </div>
+                            ) : <HelpCircle className="text-slate-300" />}
+                        </button>
+                    )
+                })}
+            </div>
+        </div>
+    );
+};
+
+// JOGO 3: DRAG AND DROP (Já existente)
+const DragDropGame = ({ onComplete }) => {
+    const [targets, setTargets] = useState(DRAG_DATA.pairs.map(p => ({ ...p, assigned: null })));
+    const [options, setOptions] = useState(DRAG_DATA.sources);
+    const [selectedOption, setSelectedOption] = useState(null);
+
+    const handleAssign = (targetId) => {
+        if (!selectedOption) return;
+        const newTargets = targets.map(t => t.id === targetId ? { ...t, assigned: selectedOption } : t);
+        const newOptions = options.filter(o => o.id !== selectedOption.id);
+        // Se já tinha um, devolve
+        const oldTarget = targets.find(t => t.id === targetId);
+        if (oldTarget.assigned) newOptions.push(oldTarget.assigned);
+
+        setTargets(newTargets);
+        setOptions(newOptions);
+        setSelectedOption(null);
+
+        if (newTargets.every(t => t.assigned && t.assigned.content === t.description)) {
+            setTimeout(onComplete, 1000);
+        }
+    };
+
+    return (
+        <div className="p-4 h-full flex flex-col">
+            <h2 className="text-center font-bold text-slate-700 mb-4">Conecte o Poder</h2>
+            <div className="space-y-3 flex-grow">
+                {targets.map(t => (
+                    <div key={t.id} onClick={() => handleAssign(t.id)} 
+                        className={`p-4 rounded-xl border-2 border-dashed flex justify-between items-center transition-all ${t.assigned ? 'border-blue-500 bg-blue-50' : 'border-slate-300'}`}>
+                        <span className="font-bold text-slate-600">{t.target}</span>
+                        <div className={`px-3 py-1 rounded text-xs font-bold ${t.assigned ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                            {t.assigned ? t.assigned.content : '?'}
+                        </div>
                     </div>
-                    <input type="text" id="client-search" placeholder="Buscar cliente por nome..." class="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                ))}
+            </div>
+            <div className="flex flex-wrap gap-2 justify-center mt-4 pb-4">
+                {options.map(opt => (
+                    <button key={opt.id} onClick={() => setSelectedOption(opt)} 
+                        className={`px-4 py-2 rounded-full font-bold text-sm border-2 ${selectedOption?.id === opt.id ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>
+                        {opt.content}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+// JOGO 4: SPELL TYPER (Novo)
+const SpellTyperGame = ({ onComplete }) => {
+    const [spellIdx, setSpellIdx] = useState(0);
+    const [input, setInput] = useState('');
+    const currentSpell = SPELL_DATA[spellIdx];
+    const [shake, setShake] = useState(false);
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (input.toLowerCase().trim() === currentSpell.spell.toLowerCase().trim()) {
+            setInput('');
+            if (spellIdx + 1 < SPELL_DATA.length) setSpellIdx(prev => prev + 1);
+            else onComplete();
+        } else {
+            setShake(true);
+            setTimeout(() => setShake(false), 500);
+        }
+    };
+
+    return (
+        <div className="p-6 h-full flex flex-col justify-center items-center bg-slate-900 text-white">
+            <div className="mb-8 text-center">
+                <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-500/50">
+                    <Zap className="w-8 h-8 text-white" />
                 </div>
-                <button id="add-client-btn" class="w-full sm:w-auto flex-shrink-0 flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition duration-150">
-                    <ion-icon name="add-outline" class="text-xl"></ion-icon>
-                    Novo Cliente
+                <p className="text-blue-300 font-bold uppercase tracking-widest text-xs mb-2">Feitiço {spellIdx + 1}/{SPELL_DATA.length}</p>
+                <h2 className="text-2xl font-black mb-2">{currentSpell.spell}</h2>
+                <p className="text-slate-400 text-sm italic">"{currentSpell.meaning}"</p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="w-full">
+                <input 
+                    autoFocus
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    className={`w-full bg-slate-800 border-2 border-slate-700 rounded-xl p-4 text-center font-bold text-lg focus:border-blue-500 focus:outline-none transition-all ${shake ? 'border-red-500 translate-x-2' : ''}`}
+                    placeholder="Digite o feitiço..."
+                />
+                <button type="submit" className="w-full mt-4 py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold transition shadow-lg shadow-blue-900">
+                    Lançar Feitiço
                 </button>
+            </form>
+        </div>
+    );
+};
+
+// JOGO 5: BATTLE (Novo - Estilo RPG Simples)
+const BattleGame = ({ onComplete, onMistake }) => {
+    const [enemyHp, setEnemyHp] = useState(BATTLE_DATA.enemyMaxHp);
+    const [playerHp, setPlayerHp] = useState(BATTLE_DATA.playerMaxHp);
+    const [log, setLog] = useState("Cruhell apareceu! Escolha sua ação.");
+    const [turn, setTurn] = useState('player'); // player | enemy
+
+    useEffect(() => {
+        if (enemyHp <= 0) setTimeout(onComplete, 1500);
+        if (playerHp <= 0) onMistake();
+    }, [enemyHp, playerHp]);
+
+    const enemyTurn = () => {
+        setTimeout(() => {
+            const dmg = Math.floor(Math.random() * 15) + 5;
+            setPlayerHp(prev => Math.max(0, prev - dmg));
+            setLog(`Cruhell lançou "Poignards de la mort"! -${dmg} HP`);
+            setTurn('player');
+        }, 1500);
+    };
+
+    const handleAction = (type) => {
+        if (turn !== 'player') return;
+
+        if (type === 'attack') {
+            const dmg = Math.floor(Math.random() * 20) + 10;
+            setEnemyHp(prev => Math.max(0, prev - dmg));
+            setLog(`Você usou "Gust Incinerante"! -${dmg} HP no inimigo.`);
+            setTurn('enemy');
+            enemyTurn();
+        } else if (type === 'heal') {
+            const heal = 25;
+            setPlayerHp(prev => Math.min(BATTLE_DATA.playerMaxHp, prev + heal));
+            setLog(`Você usou o Pó de Estrela! +${heal} HP.`);
+            setTurn('enemy');
+            enemyTurn();
+        }
+    };
+
+    return (
+        <div className="h-full flex flex-col bg-slate-50">
+            {/* Área do Inimigo */}
+            <div className="bg-slate-800 p-6 pb-10 rounded-b-3xl text-white text-center relative shadow-xl">
+                <div className="w-20 h-20 bg-red-900 rounded-full mx-auto flex items-center justify-center mb-3 border-4 border-red-700">
+                    <Ghost size={40} />
+                </div>
+                <h3 className="font-black text-xl text-red-100">{BATTLE_DATA.enemyName}</h3>
+                <div className="w-full bg-slate-900 h-3 rounded-full mt-2 overflow-hidden border border-slate-700">
+                    <div className="bg-red-500 h-full transition-all duration-500" style={{ width: `${(enemyHp / BATTLE_DATA.enemyMaxHp) * 100}%` }}></div>
+                </div>
             </div>
-            
-            <ul id="clients-list" class="bg-white rounded-lg shadow-lg overflow-hidden divide-y divide-gray-200">
-                <!-- Clientes serão renderizados aqui pelo JS -->
-            </ul>
-            
-            <!-- Seção de Backup -->
-            <div class="mt-8 p-4 bg-gray-100 rounded-lg border border-gray-200">
-                <h3 class="font-semibold text-lg mb-2">Backup e Restauração</h3>
-                <p class="text-sm text-gray-600 mb-4">Exporte todos os dados para CSV ou importe um backup.</p>
-                <div class="flex gap-4">
-                    <button id="export-btn" class="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition">
-                        <ion-icon name="download-outline"></ion-icon>
-                        Exportar TUDO (CSV)
+
+            {/* Log de Batalha */}
+            <div className="flex-grow p-6 flex items-center justify-center">
+                <p className="text-center text-slate-600 font-bold italic animate-pulse">{log}</p>
+            </div>
+
+            {/* Controles do Jogador */}
+            <div className="p-6 bg-white border-t border-slate-200">
+                <div className="flex justify-between items-center mb-4">
+                    <span className="font-bold text-slate-700">Peter Richt</span>
+                    <span className="font-bold text-green-600">{playerHp}/{BATTLE_DATA.playerMaxHp} HP</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => handleAction('attack')} disabled={turn !== 'player'} className="bg-red-100 text-red-600 p-4 rounded-xl font-bold flex flex-col items-center border-2 border-red-200 hover:bg-red-200 transition active:scale-95 disabled:opacity-50">
+                        <Flame className="mb-1" /> Atacar
                     </button>
-                    <button id="import-btn" class="flex items-center gap-2 bg-yellow-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-yellow-600 transition">
-                        <ion-icon name="cloud-upload-outline"></ion-icon>
-                        Importar (CSV)
+                    <button onClick={() => handleAction('heal')} disabled={turn !== 'player'} className="bg-green-100 text-green-600 p-4 rounded-xl font-bold flex flex-col items-center border-2 border-green-200 hover:bg-green-200 transition active:scale-95 disabled:opacity-50">
+                        <RefreshCw className="mb-1" /> Curar
                     </button>
-                    <input type="file" id="import-input" class="hidden" accept=".csv">
                 </div>
             </div>
         </div>
+    );
+};
 
-        <!-- (VIEW 2) Detalhes do Cliente -->
-        <div id="client-detail-view" class="hidden">
-            <!-- Navegação -->
-            <div class="mb-4">
-                <button id="back-to-clients-btn" class="flex items-center gap-1 text-blue-600 hover:underline font-medium">
-                    <ion-icon name="arrow-back-outline"></ion-icon>
-                    Voltar para Clientes
-                </button>
+// JOGO 6: UNSCRAMBLE (Novo - Puzzle)
+const UnscrambleGame = ({ onComplete }) => {
+    const [pieces, setPieces] = useState([...PUZZLE_DATA.scrambled]);
+    const [ordered, setOrdered] = useState([]);
+
+    const handleSelect = (piece) => {
+        setPieces(pieces.filter(p => p.id !== piece.id));
+        setOrdered([...ordered, piece]);
+    };
+
+    const handleReset = () => {
+        setPieces([...PUZZLE_DATA.scrambled]);
+        setOrdered([]);
+    };
+
+    const handleCheck = () => {
+        const currentText = ordered.map(p => p.text).join(" ");
+        const correctText = PUZZLE_DATA.correctOrder.join(" ");
+        
+        if (currentText === correctText) onComplete();
+        else alert("A ordem está incorreta. Tente novamente!");
+    };
+
+    return (
+        <div className="p-6 h-full flex flex-col bg-[#fffbeb]">
+            <div className="text-center mb-6">
+                <FileText className="w-12 h-12 text-amber-600 mx-auto mb-2" />
+                <h2 className="text-xl font-black text-amber-800">Restaure a Página Rasgada</h2>
+                <p className="text-amber-700 text-sm mt-1">Clique nos trechos para formar a frase final.</p>
             </div>
 
-            <!-- Card de Resumo do Cliente -->
-            <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-                <!-- Cabeçalho do Cliente -->
-                <div class="flex justify-between items-start mb-4">
-                    <div>
-                        <h2 id="client-detail-name" class="text-3xl font-bold text-gray-900">Nome do Cliente</h2>
-                        <div class="flex items-center gap-4 text-gray-600 mt-1">
-                            <span class="flex items-center gap-1"><ion-icon name="call-outline"></ion-icon> <span id="client-detail-phone"></span></span>
-                            <span class="flex items-center gap-1"><ion-icon name="id-card-outline"></ion-icon> <span id="client-detail-cpf"></span></span>
-                        </div>
-                    </div>
-                    <button id="btn-edit-client" class="text-gray-500 hover:text-blue-600 p-2 rounded-full hover:bg-gray-100">
-                        <ion-icon name="pencil-outline" class="text-xl"></ion-icon>
+            {/* Área de Montagem */}
+            <div className="bg-white border-2 border-amber-200 p-4 rounded-xl min-h-[150px] mb-6 shadow-inner flex flex-wrap content-start gap-2">
+                {ordered.length === 0 && <span className="text-slate-300 w-full text-center self-center italic">O texto aparecerá aqui...</span>}
+                {ordered.map((p, idx) => (
+                    <span key={idx} className="bg-amber-100 text-amber-900 px-2 py-1 rounded border border-amber-300 font-serif font-medium">
+                        {p.text}
+                    </span>
+                ))}
+            </div>
+
+            {/* Peças */}
+            <div className="flex flex-wrap gap-2 justify-center flex-grow content-start">
+                {pieces.map(p => (
+                    <button key={p.id} onClick={() => handleSelect(p)} className="bg-white text-slate-700 px-4 py-3 rounded-lg shadow-sm border border-slate-200 font-medium hover:bg-slate-50 active:scale-95 transition">
+                        {p.text}
                     </button>
+                ))}
+            </div>
+
+            <div className="flex gap-3 mt-auto">
+                <button onClick={handleReset} className="p-4 bg-slate-200 text-slate-600 rounded-xl font-bold"><RefreshCw /></button>
+                <button onClick={handleCheck} className="flex-grow p-4 bg-amber-500 text-white rounded-xl font-bold shadow-lg shadow-amber-200">Verificar Página</button>
+            </div>
+        </div>
+    );
+};
+
+// ====================================================================
+// --- APP PRINCIPAL ---
+// ====================================================================
+
+const App = () => {
+  const [screen, setScreen] = useState('Auth');
+  const [currentUser, setCurrentUser] = useState(null);
+  const [progress, setProgress] = useState({ currentModuleId: 'm1', completedModules: [] });
+  const [currentGame, setCurrentGame] = useState(null);
+  const [userHearts, setUserHearts] = useState(5);
+  const [showWinModal, setShowWinModal] = useState(false);
+  const [users, setUsers] = useState(INITIAL_USERS);
+
+  // Auth Logic
+  const handleLogin = (user) => { setCurrentUser(user); setScreen('Home'); };
+  const handleRegister = (u) => { setUsers([...users, u]); setCurrentUser(u); setScreen('Home'); };
+
+  // Game Logic
+  const startGame = (module) => {
+      setCurrentGame(module);
+      setScreen('Game');
+  };
+
+  const handleWin = () => {
+      setShowWinModal(true);
+      const currIdx = MAP_STRUCTURE.findIndex(m => m.id === currentGame.id);
+      const nextModule = MAP_STRUCTURE[currIdx + 1];
+      
+      setProgress(prev => ({
+          ...prev,
+          completedModules: [...prev.completedModules, currentGame.id],
+          currentModuleId: nextModule ? nextModule.id : 'completed'
+      }));
+  };
+
+  const handleCloseWin = () => {
+      setShowWinModal(false);
+      setScreen('Map');
+  };
+
+  // Component Renders
+  const renderGame = () => {
+      switch(currentGame?.gameType) {
+          case 'Quiz': return <QuizGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} />;
+          case 'DragAndDrop': return <DragDropGame onComplete={handleWin} />;
+          case 'Memory': return <MemoryGame onComplete={handleWin} />;
+          case 'SpellTyper': return <SpellTyperGame onComplete={handleWin} />;
+          case 'Battle': return <BattleGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} />;
+          case 'Unscramble': return <UnscrambleGame onComplete={handleWin} />;
+          default: return <div>Jogo não encontrado</div>;
+      }
+  };
+
+  // --- TELA DE AUTH ---
+  if (screen === 'Auth') {
+    return (
+        <div className="max-w-md mx-auto bg-white h-screen flex flex-col p-6 justify-center">
+             <div className="text-center mb-10">
+                <div className="w-20 h-20 bg-yellow-100 rounded-3xl mx-auto flex items-center justify-center mb-4 rotate-3">
+                    <Feather className="w-10 h-10 text-yellow-600" />
                 </div>
+                <h1 className="text-3xl font-black text-slate-800">{APP_NAME}</h1>
+                <p className="text-slate-500">Aventure-se por Inária</p>
+             </div>
+             
+             <div className="space-y-3">
+                <h2 className="text-sm font-bold text-slate-400 uppercase">Usuários Disponíveis (Mock)</h2>
+                {users.map(u => (
+                    <button key={u.username} onClick={() => handleLogin(u)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between hover:bg-slate-100 transition">
+                        <span className="font-bold text-slate-700">{u.name}</span>
+                        {/* CORREÇÃO: ChevronRight agora está importado */}
+                        <ChevronRight className="text-slate-400" size={16} />
+                    </button>
+                ))}
+             </div>
+
+             <button onClick={() => {
+                 const name = prompt("Nome:");
+                 const user = prompt("Usuário:");
+                 if(name && user) handleRegister({ username: user, name, password: '123', email: 'novo@test.com' });
+             }} className="mt-6 w-full py-4 border-2 border-slate-200 text-slate-600 font-bold rounded-xl">
+                 Criar Novo Usuário
+             </button>
+        </div>
+    );
+  }
+
+  // --- TELA PRINCIPAL (HOME) ---
+  if (screen === 'Home') {
+      return (
+          <div className="max-w-md mx-auto bg-slate-50 h-screen flex flex-col">
+              <div className="bg-white p-6 shadow-sm flex justify-between items-center">
+                  <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase">Olá, {currentUser.name}</p>
+                      <h2 className="text-xl font-black text-slate-800">Seus Livros</h2>
+                  </div>
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+                      {currentUser.name[0]}
+                  </div>
+              </div>
+
+              <div className="p-6 flex-grow">
+                  {MOCK_BOOKS.map(book => (
+                      <div key={book.id} onClick={() => setScreen('Map')} className="bg-white p-4 rounded-2xl border-2 border-yellow-400 shadow-xl shadow-yellow-100 cursor-pointer transform transition hover:scale-[1.02]">
+                          <div className="flex items-center space-x-4">
+                              <div className="w-16 h-16 bg-yellow-500 rounded-xl flex items-center justify-center text-white shadow-lg">
+                                  <Feather size={32} />
+                              </div>
+                              <div>
+                                  <h3 className="font-bold text-lg text-slate-800">{book.title}</h3>
+                                  <div className="flex items-center space-x-2 mt-1">
+                                    <span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded text-slate-500">6 Fases</span>
+                                    <span className="text-xs font-bold text-yellow-600">
+                                        {Math.round((progress.completedModules.length / MAP_STRUCTURE.length) * 100)}% Completo
+                                    </span>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  ))}
+
+                  <div className="mt-8 p-6 bg-blue-600 rounded-2xl text-white shadow-lg shadow-blue-200">
+                      <div className="flex items-center space-x-2 mb-2">
+                          <Award className="text-blue-200" />
+                          <span className="font-bold uppercase text-xs text-blue-200">Próxima Conquista</span>
+                      </div>
+                      <h3 className="font-bold text-lg">Guardião de Inária</h3>
+                      <p className="text-sm text-blue-100 mt-1 opacity-80">Complete todos os 6 mini-games para ganhar este título.</p>
+                  </div>
+              </div>
+          </div>
+      );
+  }
+
+  // --- TELA DO MAPA ---
+  if (screen === 'Map') {
+      return (
+        <div className="max-w-md mx-auto bg-slate-100 h-screen flex flex-col">
+            <div className="bg-white p-4 sticky top-0 z-10 shadow-sm flex items-center justify-between">
+                <button onClick={() => setScreen('Home')}><ArrowLeft className="text-slate-400" /></button>
+                <span className="font-bold text-slate-700">Mapa da Jornada</span>
+                <Settings className="text-slate-400" />
+            </div>
+
+            <div className="flex-grow overflow-y-auto p-6 pb-24 relative">
+                {/* Linha do Mapa */}
+                <div className="absolute left-1/2 top-10 bottom-10 w-1 bg-slate-300 -translate-x-1/2 rounded-full" />
                 
-                <!-- Observações -->
-                <div class="mb-6">
-                    <p class="text-sm text-gray-500 italic" id="client-detail-notes"></p>
-                </div>
-                
-                <!-- Total Devedor -->
-                <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-center">
-                    <p class="text-sm font-medium text-red-700">TOTAL EM ABERTO</p>
-                    <p id="client-detail-total-open" class="text-4xl font-extrabold text-red-600">R$ 0,00</p>
-                </div>
+                <div className="space-y-10 relative z-10">
+                    {MAP_STRUCTURE.map((mod, idx) => {
+                        const isCompleted = progress.completedModules.includes(mod.id);
+                        const isCurrent = progress.currentModuleId === mod.id;
+                        const isLocked = !isCompleted && !isCurrent;
+                        
+                        return (
+                            <div key={mod.id} className={`flex flex-col items-center ${idx % 2 === 0 ? 'mr-auto pr-12 self-start' : 'ml-auto pl-12 self-end'} w-1/2 relative`}>
+                                {/* Conector Horizontal */}
+                                <div className={`absolute top-8 h-1 w-12 bg-slate-300 ${idx % 2 === 0 ? 'right-0' : 'left-0'}`} />
 
-                <!-- Botões de Ação Grandes -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <button id="btn-open-payment" class="w-full flex-1 flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-green-700 transition">
-                        <ion-icon name="cash-outline" class="text-xl"></ion-icon>
-                        Registrar Pagamento
-                    </button>
-                    <button id="btn-open-add-promissory" class="w-full flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition">
-                        <ion-icon name="add-circle-outline" class="text-xl"></ion-icon>
-                        Nova Promissória
-                    </button>
-                    <button id="btn-open-add-ocr" class="w-full flex-1 flex items-center justify-center gap-2 bg-purple-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-purple-700 transition" title="Simulação de cadastro por foto">
-                        <ion-icon name="camera-outline" class="text-xl"></ion-icon>
-                        Lançar por Foto (IA)
-                    </button>
-                </div>
-            </div>
-
-            <!-- Abas de Parcelas -->
-            <div>
-                <div class="border-b border-gray-200 mb-4">
-                    <nav class="flex -mb-px space-x-6">
-                        <button id="tab-open" class="py-3 px-1 border-b-2 font-medium text-lg text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors duration-150 tab-active">
-                            Em Aberto
-                        </button>
-                        <button id="tab-paid" class="py-3 px-1 border-b-2 font-medium text-lg text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors duration-150">
-                            Pagas
-                        </button>
-                    </nav>
-                </div>
-
-                <!-- Conteúdo da Aba "Em Aberto" -->
-                <div id="open-installments-content">
-                    <ul id="open-installments-list">
-                        <!-- Parcelas em aberto renderizadas aqui -->
-                    </ul>
-                </div>
-
-                <!-- Conteúdo da Aba "Pagas" -->
-                <div id="paid-installments-content" class="hidden">
-                    <ul id="paid-installments-list">
-                        <!-- Parcelas pagas renderizadas aqui -->
-                    </ul>
+                                <button 
+                                    disabled={isLocked}
+                                    onClick={() => startGame(mod)}
+                                    className={`w-16 h-16 rounded-full border-4 shadow-lg flex items-center justify-center transition-transform active:scale-95 z-20
+                                    ${isCompleted ? 'bg-yellow-400 border-yellow-500 text-white' : isCurrent ? 'bg-blue-500 border-blue-600 text-white ring-4 ring-blue-200' : 'bg-slate-200 border-slate-300 text-slate-400'}`}>
+                                    {isCompleted ? <Check /> : isLocked ? <Lock size={20} /> : <Star fill="currentColor" />}
+                                </button>
+                                <div className="mt-2 bg-white p-2 rounded-lg shadow-sm text-center min-w-[120px]">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Fase {idx + 1}</p>
+                                    <p className="text-xs font-bold text-slate-700 leading-tight">{mod.title}</p>
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
         </div>
-    </div>
+      );
+  }
 
-    <!-- MODAIS (Flutuantes) -->
-
-    <!-- Modal: Adicionar/Editar Cliente -->
-    <div id="client-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-40 p-4">
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative animate-fade-in">
-            <button class="modal-close absolute top-3 right-3 text-gray-400 hover:text-gray-600">
-                <ion-icon name="close-circle-outline" class="text-3xl"></ion-icon>
-            </button>
-            <h3 id="client-modal-title" class="text-2xl font-bold mb-6">Cadastrar Novo Cliente</h3>
-            
-            <form id="client-form">
-                <input type="hidden" name="clientId">
-                <div class="space-y-4">
-                    <div>
-                        <label for="name" class="block text-sm font-medium text-gray-700">Nome Completo *</label>
-                        <input type="text" name="name" id="name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                    </div>
-                    <div>
-                        <label for="phone" class="block text-sm font-medium text-gray-700">Telefone (com DDD) *</label>
-                        <input type="tel" name="phone" id="phone" placeholder="(XX) 9XXXX-XXXX" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                    </div>
-                    <div>
-                        <label for="cpf" class="block text-sm font-medium text-gray-700">CPF (Opcional)</label>
-                        <input type="text" name="cpf" id="cpf" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3">
-                    </div>
-                    <div>
-                        <label for="notes" class="block text-sm font-medium text-gray-700">Observações (Opcional)</label>
-                        <textarea name="notes" id="notes" rows="3" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3"></textarea>
-                    </div>
-                </div>
-                <div class="mt-6 flex justify-between gap-4">
-                    <button type="button" id="delete-client-btn" class="hidden flex items-center justify-center gap-2 bg-red-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-red-700 transition">
-                        <ion-icon name="trash-outline"></ion-icon>
-                        Excluir
-                    </button>
-                    <button type="submit" class="flex-grow flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition">
-                        <ion-icon name="save-outline"></ion-icon>
-                        Salvar Cliente
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-    
-    <!-- Modal: Adicionar Promissória (Manual) -->
-    <div id="promissory-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-40 p-4 overflow-y-auto">
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative">
-            <button class="modal-close absolute top-3 right-3 text-gray-400 hover:text-gray-600">
-                <ion-icon name="close-circle-outline" class="text-3xl"></ion-icon>
-            </button>
-            <h3 class="text-2xl font-bold mb-6">Nova Promissória (Manual)</h3>
-            
-            <form id="promissory-form">
-                <div class="space-y-4">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Valor Total (R$)</label>
-                            <input type="number" name="totalValue" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Nº de Parcelas</label>
-                            <input type="number" name="numInstallments" min="1" step="1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">1º Vencimento</label>
-                        <input type="date" name="firstDueDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Observações (Opcional)</label>
-                        <input type="text" name="notes" placeholder="Ex: Compra da Jaqueta Azul" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3">
-                    </div>
-                    
-                    <button type="button" id="generateFieldsBtn" class="w-full flex items-center justify-center gap-2 bg-gray-200 text-gray-800 px-5 py-3 rounded-lg font-semibold hover:bg-gray-300 transition">
-                        <ion-icon name="list-outline"></ion-icon>
-                        Gerar Campos das Parcelas
-                    </button>
-                    
-                    <hr>
-                    
-                    <h4 class="font-semibold">Detalhes das Parcelas:</h4>
-                    <div id="installments-container" class="max-h-48 overflow-y-auto space-y-2 bg-gray-50 p-2 rounded">
-                        <!-- Campos das parcelas aparecem aqui -->
-                    </div>
-                </div>
-                <div class="mt-6 flex justify-end">
-                    <button type="submit" class="flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-blue-700 transition">
-                        <ion-icon name="save-outline"></ion-icon>
-                        Salvar Promissória
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-    
-    <!-- Modal: Registrar Pagamento -->
-    <div id="payment-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-40 p-4 overflow-y-auto">
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative">
-            <button class="modal-close absolute top-3 right-3 text-gray-400 hover:text-gray-600">
-                <ion-icon name="close-circle-outline" class="text-3xl"></ion-icon>
-            </button>
-            <h3 class="text-2xl font-bold mb-6">Registrar Pagamento</h3>
-            
-            <form id="payment-form">
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Selecione as parcelas a pagar:</label>
-                        <div id="payment-installments-list" class="mt-2 max-h-60 overflow-y-auto space-y-2 border border-gray-200 rounded-lg p-3">
-                            <!-- Lista de checkboxes das parcelas -->
-                        </div>
-                    </div>
-                    
-                    <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg text-center">
-                        <p class="text-sm font-medium text-blue-700">TOTAL A PAGAR</p>
-                        <p id="payment-total" class="text-3xl font-extrabold text-blue-600">R$ 0,00</p>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Data do Pagamento</label>
-                            <input type="date" name="paymentDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700">Forma de Pagamento</label>
-                            <select name="paymentMethod" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                                <option value="Pix">Pix</option>
-                                <option value="Dinheiro">Dinheiro</option>
-                                <option value="Cartão Débito">Cartão Débito</option>
-                                <option value="Cartão Crédito">Cartão Crédito</option>
-                                <option value="Outro">Outro</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                <div class="mt-6 flex justify-end">
-                    <button type="submit" class="flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-green-700 transition">
-                        <ion-icon name="checkmark-circle-outline"></ion-icon>
-                        Confirmar Pagamento
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-    
-    <!-- Modal: Adicionar por Foto (OCR Simulado) -->
-    <div id="ocr-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-40 p-4">
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 m-4 relative">
-            <button class="modal-close absolute top-3 right-3 text-gray-400 hover:text-gray-600">
-                <ion-icon name="close-circle-outline" class="text-3xl"></ion-icon>
-            </button>
-            <h3 class="text-2xl font-bold mb-2">Lançar por Foto (Simulação)</h3>
-            <p class="text-gray-600 mb-4">A IA "leu" a foto. Apenas confirme os dados abaixo.</p>
-            
-            <div class="p-4 rounded-lg bg-yellow-50 border border-yellow-300 mb-4">
-                <p class="font-semibold text-yellow-800">COMO FUNCIONA (NA VERSÃO FINAL):</p>
-                <p class="text-sm text-yellow-700">1. Você tira a foto da promissória.</p>
-                <p class="text-sm text-yellow-700">2. A IA lê os dados automaticamente.</p>
-                <p class="text-sm text-yellow-700">3. Você apenas confirma nesta tela.</p>
+  // --- TELA DE JOGO ---
+  if (screen === 'Game') {
+      return (
+        <div className="max-w-md mx-auto bg-white h-screen flex flex-col">
+            <div className="p-4 border-b flex justify-between items-center bg-slate-50">
+                <button onClick={() => setScreen('Map')}><X className="text-slate-400" /></button>
+                <span className="font-bold text-slate-700">{currentGame.title}</span>
+                <HeartsDisplay count={userHearts} />
             </div>
-            
-            <form id="ocr-form">
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Valor (R$)</label>
-                        <input type="number" name="ocr_value" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Data Vencimento</label>
-                        <input type="date" name="ocr_dueDate" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3" required>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Observações (Opcional)</label>
-                        <input type="text" name="ocr_notes" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-lg p-3">
-                    </div>
-                </div>
-                <div class="mt-6 flex justify-end">
-                    <button type="submit" class="flex items-center justify-center gap-2 bg-purple-600 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:bg-purple-700 transition">
-                        <ion-icon name="save-outline"></ion-icon>
-                        Salvar Parcela
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
+            <div className="flex-grow overflow-hidden relative">
+                {renderGame()}
+            </div>
 
-</body>
-</html>
+            {showWinModal && (
+                <Modal title="Fase Concluída!" onClose={handleCloseWin} color="green">
+                    <div className="text-center">
+                        <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Trophy className="w-10 h-10 text-green-600" />
+                        </div>
+                        <p>Você dominou esta parte da história!</p>
+                        <p className="text-sm mt-2 text-slate-400">+150 XP</p>
+                    </div>
+                </Modal>
+            )}
+        </div>
+      );
+  }
+
+  return <div>Carregando...</div>;
+};
+
+export default App;
