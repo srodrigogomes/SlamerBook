@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SlamerPath - Aventura em Inária</title>
+    <title>SlamerBook - Aventura em Inária</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,17 +12,20 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     
-    <!-- Babel (para compilar JSX no navegador) -->
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <style>
-        /* Animações personalizadas para simular o lucide-react e transições */
+        /* Animações */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0px); } }
+        
         .animate-in { animation: fadeIn 0.5s ease-out forwards; }
         .slide-in-from-right { animation: slideIn 0.3s ease-out forwards; }
+        .animate-float { animation: float 3s ease-in-out infinite; }
         
-        /* Scrollbar personalizada sutil */
+        /* Scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -37,7 +40,7 @@
         const { useState, useEffect } = React;
 
         // ==========================================
-        // --- ÍCONES (Adaptados para HTML Único) ---
+        // --- ÍCONES (SVG MANUAL) ---
         // ==========================================
         const IconBase = ({ children, color = "currentColor", size = 24, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -45,8 +48,10 @@
             </svg>
         );
 
+        // LISTA COMPLETA DE ÍCONES PARA EVITAR ERROS
         const Icons = {
             Feather: (props) => <IconBase {...props}><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"></path><line x1="16" y1="8" x2="2" y2="22"></line><line x1="17.5" y1="15" x2="9" y2="15"></line></IconBase>,
+            BookOpen: (props) => <IconBase {...props}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></IconBase>,
             User: (props) => <IconBase {...props}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></IconBase>,
             Lock: (props) => <IconBase {...props}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></IconBase>,
             ArrowLeft: (props) => <IconBase {...props}><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></IconBase>,
@@ -70,14 +75,20 @@
             HelpCircle: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></IconBase>,
             FileText: (props) => <IconBase {...props}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></IconBase>,
             Layers: (props) => <IconBase {...props}><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></IconBase>,
-            UserPlus: (props) => <IconBase {...props}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></IconBase>
+            UserPlus: (props) => <IconBase {...props}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></IconBase>,
+            Sparkles: (props) => <IconBase {...props}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></IconBase>,
+            Plus: (props) => <IconBase {...props}><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></IconBase>,
+            Upload: (props) => <IconBase {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></IconBase>,
+            Lightbulb: (props) => <IconBase {...props}><line x1="9" y1="18" x2="15" y2="18"></line><line x1="10" y1="22" x2="14" y2="22"></line><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 12 2a4.65 4.65 0 0 0-4.5 4.5c0 1.12.38 2.13 1 3.08.65.76 1.13 1.52 1.25 2.42"></path></IconBase>,
+            Loader2: (props) => <IconBase {...props}><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></IconBase>,
+            LogIn: (props) => <IconBase {...props}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></IconBase>
         };
 
         // ====================================================================
-        // --- DADOS E LÓGICA ---
+        // --- DADOS E LÓGICA DO SLAMERBOOK ---
         // ====================================================================
 
-        const APP_NAME = "SlamerPath";
+        const APP_NAME = "SlamerBook";
 
         const INITIAL_USERS = [
           { username: 'admin', password: '123', name: 'Rodrigo Gomes', email: 'autor@slamer.com', isAdmin: true },
@@ -183,6 +194,40 @@
 
         // --- COMPONENTES AUXILIARES ---
         
+        const MagicLogo = () => {
+            const [isBook, setIsBook] = useState(false);
+            const [isMorphing, setIsMorphing] = useState(false);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    setIsMorphing(true);
+                    setTimeout(() => {
+                        setIsBook(prev => !prev);
+                        setIsMorphing(false);
+                    }, 500); 
+                }, 3000); 
+                return () => clearInterval(interval);
+            }, []);
+
+            return (
+                <div className="relative w-32 h-32 mx-auto mb-6 animate-float">
+                    <div className={`absolute inset-0 bg-yellow-300 rounded-full blur-2xl opacity-30 transition-all duration-1000 ${isMorphing ? 'scale-150 opacity-60' : 'scale-100'}`}></div>
+                    <div className="relative w-full h-full bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-3xl flex items-center justify-center border-4 border-yellow-200 shadow-2xl shadow-yellow-200/50 rotate-3 transition-all duration-500 hover:rotate-6 z-10 overflow-hidden">
+                        <div className={`absolute transition-all duration-700 ease-in-out transform ${isBook ? 'opacity-0 scale-0 rotate-180' : 'opacity-100 scale-100 rotate-0'}`}>
+                            <Icons.Feather className="w-16 h-16 text-yellow-600 drop-shadow-md" />
+                        </div>
+                        <div className={`absolute transition-all duration-700 ease-in-out transform ${!isBook ? 'opacity-0 scale-0 -rotate-180' : 'opacity-100 scale-100 rotate-0'}`}>
+                            <Icons.BookOpen className="w-16 h-16 text-yellow-600 drop-shadow-md" />
+                        </div>
+                        <div className={`absolute inset-0 pointer-events-none transition-opacity duration-300 ${isMorphing ? 'opacity-100' : 'opacity-0'}`}>
+                             <Icons.Sparkles className="absolute top-2 left-2 w-4 h-4 text-yellow-400 animate-ping" />
+                             <Icons.Sparkles className="absolute bottom-3 right-3 w-3 h-3 text-orange-400 animate-ping delay-100" />
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         const HeartsDisplay = ({ count }) => (
           <div className="flex items-center space-x-1 px-3 py-1 bg-red-50 border border-red-100 rounded-full">
             <Icons.Heart className="w-4 h-4 text-red-500 fill-red-500" />
@@ -202,7 +247,11 @@
           </div>
         );
 
-        // --- TELAS DE AUTH ---
+        const AuthLayout = ({ children, className = "" }) => (
+            <div className={`flex flex-col h-screen max-w-md mx-auto bg-white p-6 shadow-xl ${className}`}>
+                {children}
+            </div>
+        );
 
         const AuthScreen = ({ onLogin, onRegister, existingUsers }) => {
             const [view, setView] = useState('intro'); 
@@ -230,61 +279,61 @@
                 onRegister({ name: signupData.name, username: signupData.username, password: signupData.password, email: signupData.email, isAdmin: false });
             };
 
-            const FeatureIcon = feature.icon;
-
             if (view === 'intro') {
                 return (
-                    <div className="flex flex-col h-full bg-white p-6 justify-between animate-in">
-                        <div className="mt-10 text-center">
-                            <div className="bg-yellow-50 w-24 h-24 rounded-3xl flex items-center justify-center mx-auto mb-4 rotate-3 border-4 border-yellow-100 shadow-xl shadow-yellow-100">
-                                <Icons.Feather className="w-12 h-12 text-yellow-600" />
-                            </div>
+                    <AuthLayout className="justify-between animate-in fade-in duration-500">
+                        <div className="mt-6 text-center">
+                            <MagicLogo />
                             <h1 className="text-4xl font-black text-slate-800 tracking-tight">{APP_NAME}</h1>
                             <p className="text-slate-500 mt-2 text-lg">Sua jornada por Inária começa aqui.</p>
                         </div>
                         <div className="h-32 flex flex-col items-center justify-center text-center p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                            <FeatureIcon className="w-8 h-8 text-yellow-500 mb-3" />
+                            <feature.icon className="w-8 h-8 text-yellow-500 mb-3" />
                             <p className="font-medium text-slate-700">{feature.text}</p>
                         </div>
-                        <div className="space-y-3 mb-8">
+                        <div className="space-y-3 mb-4">
                             <button onClick={() => setView('login')} className="w-full py-4 bg-yellow-500 text-white font-bold rounded-2xl shadow-lg shadow-yellow-200 hover:bg-yellow-600 transition active:scale-95">ENTRAR</button>
                             <button onClick={() => setView('signup')} className="w-full py-4 bg-white text-slate-600 font-bold rounded-2xl border-2 border-slate-100 hover:bg-slate-50 transition active:scale-95">CRIAR CONTA</button>
                         </div>
-                    </div>
+                    </AuthLayout>
                 );
             }
 
             if (view === 'login') {
                 return (
-                    <div className="flex flex-col h-full bg-white p-6 slide-in-from-right">
-                        <button onClick={() => setView('intro')} className="self-start mb-6 text-slate-400"><Icons.ArrowLeft /></button>
+                    <AuthLayout className="animate-in slide-in-from-right duration-300">
+                        <button onClick={() => setView('intro')} className="self-start mb-6 text-slate-400 hover:bg-slate-50 p-2 rounded-full"><Icons.ArrowLeft /></button>
                         <h2 className="text-3xl font-black text-slate-800 mb-2">Login</h2>
                         <div className="space-y-4 flex-grow">
-                            <input type="text" placeholder="Usuário (ex: peter)" className="w-full p-4 bg-slate-50 rounded-xl font-bold border" value={loginData.username} onChange={e => setLoginData({...loginData, username: e.target.value})} />
-                            <input type="password" placeholder="Senha" className="w-full p-4 bg-slate-50 rounded-xl font-bold border" value={loginData.password} onChange={e => setLoginData({...loginData, password: e.target.value})} />
-                            {error && <div className="text-red-500 font-bold text-sm">{error}</div>}
+                            <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 focus-within:ring-2 focus-within:ring-yellow-400 transition-all">
+                                <p className="text-xs font-bold text-slate-400 px-2 uppercase">Usuário</p>
+                                <input type="text" placeholder="ex: peter" className="w-full p-2 bg-transparent font-bold text-slate-700 outline-none" value={loginData.username} onChange={e => setLoginData({...loginData, username: e.target.value})} />
+                            </div>
+                            <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 focus-within:ring-2 focus-within:ring-yellow-400 transition-all">
+                                <p className="text-xs font-bold text-slate-400 px-2 uppercase">Senha</p>
+                                <input type="password" placeholder="******" className="w-full p-2 bg-transparent font-bold text-slate-700 outline-none" value={loginData.password} onChange={e => setLoginData({...loginData, password: e.target.value})} />
+                            </div>
+                            {error && <div className="text-red-500 font-bold text-sm bg-red-50 p-3 rounded-lg">{error}</div>}
                         </div>
-                        <button onClick={handleLoginSubmit} className="w-full py-4 bg-yellow-500 text-white font-bold rounded-2xl shadow-lg">ENTRAR</button>
-                    </div>
+                        <button onClick={handleLoginSubmit} className="w-full py-4 bg-yellow-500 text-white font-bold rounded-2xl shadow-lg hover:bg-yellow-600 transition active:scale-95">ENTRAR</button>
+                    </AuthLayout>
                 );
             }
 
             return (
-                <div className="flex flex-col h-full bg-white p-6 slide-in-from-right">
-                    <button onClick={() => setView('intro')} className="self-start mb-6 text-slate-400"><Icons.ArrowLeft /></button>
+                <AuthLayout className="animate-in slide-in-from-right duration-300">
+                    <button onClick={() => setView('intro')} className="self-start mb-6 text-slate-400 hover:bg-slate-50 p-2 rounded-full"><Icons.ArrowLeft /></button>
                     <h2 className="text-3xl font-black text-slate-800 mb-2">Criar Conta</h2>
                     <div className="space-y-3 flex-grow">
-                        <input type="text" placeholder="Nome" className="w-full p-4 bg-slate-50 rounded-xl font-bold border" value={signupData.name} onChange={e => setSignupData({...signupData, name: e.target.value})} />
-                        <input type="text" placeholder="Usuário" className="w-full p-4 bg-slate-50 rounded-xl font-bold border" value={signupData.username} onChange={e => setSignupData({...signupData, username: e.target.value})} />
-                        <input type="password" placeholder="Senha" className="w-full p-4 bg-slate-50 rounded-xl font-bold border" value={signupData.password} onChange={e => setSignupData({...signupData, password: e.target.value})} />
-                        {error && <div className="text-red-500 font-bold text-sm">{error}</div>}
+                        <input type="text" placeholder="Nome" className="w-full p-4 bg-slate-50 rounded-xl font-bold border focus:ring-2 focus:ring-yellow-400 outline-none" value={signupData.name} onChange={e => setSignupData({...signupData, name: e.target.value})} />
+                        <input type="text" placeholder="Usuário" className="w-full p-4 bg-slate-50 rounded-xl font-bold border focus:ring-2 focus:ring-yellow-400 outline-none" value={signupData.username} onChange={e => setSignupData({...signupData, username: e.target.value})} />
+                        <input type="password" placeholder="Senha" className="w-full p-4 bg-slate-50 rounded-xl font-bold border focus:ring-2 focus:ring-yellow-400 outline-none" value={signupData.password} onChange={e => setSignupData({...signupData, password: e.target.value})} />
+                        {error && <div className="text-red-500 font-bold text-sm bg-red-50 p-3 rounded-lg">{error}</div>}
                     </div>
-                    <button onClick={handleRegisterSubmit} className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-lg">REGISTRAR</button>
-                </div>
+                    <button onClick={handleRegisterSubmit} className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-lg hover:bg-blue-700 transition active:scale-95">REGISTRAR</button>
+                </AuthLayout>
             );
         };
-
-        // --- JOGOS ---
 
         const QuizGame = ({ onComplete, onMistake }) => {
             const [selected, setSelected] = useState(null);
@@ -338,6 +387,7 @@
                         {cards.map((card) => {
                             const isFlipped = flipped.includes(card.uniqueId) || matched.includes(card.id);
                             const IconComponent = card.icon;
+                            if (!IconComponent) return null; // Proteção contra ícones faltantes
                             return (
                                 <button key={card.uniqueId} onClick={() => handleCardClick(card.uniqueId)} className={`aspect-square rounded-xl flex items-center justify-center transition-all duration-500 transform ${isFlipped ? 'bg-yellow-400 rotate-0' : 'bg-slate-200 rotate-y-180'}`}>
                                     {isFlipped ? <div className="flex flex-col items-center animate-in zoom-in"><IconComponent size={24} className="text-white mb-1" /><span className="text-[8px] font-bold text-yellow-900 uppercase">{card.name}</span></div> : <Icons.HelpCircle className="text-slate-300" />}
@@ -467,8 +517,6 @@
                 </div>
             );
         };
-
-        // --- APP PRINCIPAL ---
 
         const App = () => {
             const [screen, setScreen] = useState('Auth');
