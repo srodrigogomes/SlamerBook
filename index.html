@@ -20,24 +20,34 @@
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-5px); } 100% { transform: translateY(0px); } }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 10px #fbbf24; } 50% { box-shadow: 0 0 25px #f59e0b; } }
         
         .animate-in { animation: fadeIn 0.5s ease-out forwards; }
         .slide-in-from-right { animation: slideIn 0.3s ease-out forwards; }
         .animate-float { animation: float 3s ease-in-out infinite; }
+        .animate-shake { animation: shake 0.3s ease-in-out; }
+        .animate-pulse-glow { animation: pulse-glow 2s infinite; }
         
         /* Scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Estilo de Leitura */
+        .prose { max-width: 65ch; line-height: 1.8; }
+        .prose h1 { font-size: 2.25rem; font-weight: 800; margin-bottom: 1rem; color: #1e293b; }
+        .prose h2 { font-size: 1.5rem; font-weight: 700; margin-top: 2rem; margin-bottom: 1rem; color: #334155; }
+        .prose p { margin-bottom: 1.25rem; text-align: justify; }
     </style>
 </head>
-<body class="bg-gray-100 h-screen w-screen overflow-hidden flex justify-center items-center">
+<body class="bg-gray-100 h-screen w-screen overflow-hidden flex justify-center items-center font-sans">
 
-    <div id="root" class="w-full h-full max-w-md bg-white shadow-2xl overflow-hidden relative"></div>
+    <div id="root" class="w-full h-full max-w-md bg-white shadow-2xl overflow-hidden relative text-slate-800"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
         // ==========================================
         // --- ÍCONES (SVG MANUAL) ---
@@ -48,7 +58,6 @@
             </svg>
         );
 
-        // LISTA COMPLETA DE ÍCONES PARA EVITAR ERROS
         const Icons = {
             Feather: (props) => <IconBase {...props}><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"></path><line x1="16" y1="8" x2="2" y2="22"></line><line x1="17.5" y1="15" x2="9" y2="15"></line></IconBase>,
             BookOpen: (props) => <IconBase {...props}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></IconBase>,
@@ -81,11 +90,15 @@
             Upload: (props) => <IconBase {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></IconBase>,
             Lightbulb: (props) => <IconBase {...props}><line x1="9" y1="18" x2="15" y2="18"></line><line x1="10" y1="22" x2="14" y2="22"></line><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 12 2a4.65 4.65 0 0 0-4.5 4.5c0 1.12.38 2.13 1 3.08.65.76 1.13 1.52 1.25 2.42"></path></IconBase>,
             Loader2: (props) => <IconBase {...props}><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></IconBase>,
-            LogIn: (props) => <IconBase {...props}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></IconBase>
+            LogIn: (props) => <IconBase {...props}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></IconBase>,
+            Hash: (props) => <IconBase {...props}><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></IconBase>,
+            Eye: (props) => <IconBase {...props}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></IconBase>,
+            Grid: (props) => <IconBase {...props}><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></IconBase>,
+            Bell: (props) => <IconBase {...props}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></IconBase>
         };
 
         // ====================================================================
-        // --- DADOS E LÓGICA DO SLAMERBOOK ---
+        // --- DADOS INICIAIS DO APP ---
         // ====================================================================
 
         const APP_NAME = "SlamerBook";
@@ -102,77 +115,160 @@
             author: 'Rodrigo Gomes', 
             progress: 0, 
             icon: Icons.Feather, 
-            color: '#EAB308', 
-            isStarter: true
+            color: '#EAB308',
+            pageCount: 153, // Atualizado conforme o PDF
+            isStarter: true,
+            content: `
+Solcris – Um convite para Inária
+
+Pode parecer loucura, mas na extremidade dos seres humanos há algo que pode mudar a teoria da existência e seus benefícios. Somos seres capazes de proezas inimagináveis, só temos que libertar nossas mentes e acreditar no impossível, no irreal e no abismático.
+
+Muitas pessoas estão trancafiadas no lado hostil do mundo. São aquelas incapazes de mudar e vivem apenas aceitando o que o mundo e o destino querem proporcionar.
+
+Temos de mudar e começar a acreditar naquilo que os olhos não veem.
+
+Raramente os seres humanos se libertam do Selo Criatiun (aquilo que impede o solvimento de tudo ao nosso redor), que é lacrado em nós com o passar do tempo.
+
+À medida que crescemos, nossa mente evolui em conhecimentos, só que se obscurece em devaneio.
+
+Nossa mente é como ler um livro grande: a cada página virada, uma frase é esquecida. É o mesmo que acontece com o nosso lado criativo do cérebro; o aprendizado recente deleta o obsoleto, isto é, se você não usar frequentemente o que aprende e o que tem de melhor, consequentemente irá se esquecer.
+
+Mas existem algumas exceções, como é o caso de um dos irmãos Richt, um dos poucos a perder o conceito sobre a realidade e novamente receber a luz da clarividência.
+
+Peter é considerado um garoto parcialmente normal, de estatura média, olhos azuis, cabelos loiros. Parcialmente por ter uma aparência de um garoto qualquer de quinze anos, só que ainda não descoberto por ele, possui uma mente gradualmente desenvolvida em relação aos outros seres humanos.
+
+Alegre e aventureiro eram as palavras que descreviam o garoto. Agora não passa de um ser infausto, que só vive para os estudos e aparelhos eletrônicos. Esse enfado ocorreu após o falecimento de seu avô, aquele pelo qual Peter tinha um grande apreço e respeito. A morte de Paulo Richt transtornou não somente a vida do jovem mancebo, mas sim de toda a família.
+
+As dívidas da empresa de Paulo eram incalculáveis; nem as economias deixadas por ele foram o bastante para quitar todas as dívidas. Foi o que dizimou a família totalmente.
+
+Para Peter, Paulo deixou uma carta e duas conchas que se encaixavam nas mãos do garoto. A carta não fazia muito sentido para o jovem Richt, mas ele a guardava como se fosse um bem de raro valor, junto com as conchas.
+
+Foi escrita com letras trêmulas e palavras meio borradas, mas diariamente o garoto lia para se lembrar do avô protetor.
+
+"Meu caro neto, se em tuas mãos estas palavras estão entregues, primeiramente lhe digo adeus. Peço perdão por ter omitido sobre a realidade. Sei que estou velho, mas ainda conheço a mente humana, que expele inveja e ambição. Então eu lhe protejo da razão por enquanto. Por isso a verdade tem que novamente ser encontrada para o seu bem e de todos. A luz está à sua volta e ao seu dispor."
+
+O Sol já começava a despontar no horizonte e Peter já estava pronto, com suas vestes escolares. Ele descia a escadaria de sua antiga casa de madeira e com o pensamento longe ignora o bom dia de sua irmá caçula.
+
+Débora, menina esperta e com uma imaginação avassaladora. Cabelos loiros como mel, olhos verdes como a relva, sorriso de doce encanto, era a irmã caçula e única de Peter. Tinha apenas dez anos, mais surpreendentemente possuía pensamentos e atos desenvolvidos.
+
+Após o grande transtorno econômico da família, os pais de Peter, não vendo outra solução, resolveram se mudar para o mundo tranquilo e pacato do campo. Era estranho agora ver Sônia e Ricardo (os pais de Peter e Débora) enlameados diariamente, pois o terno e o social faziam parte de seus guarda-roupas, com as camisas remendadas e os pés descalços tentando sobreviver da colheita regada com o suor árduo, derramado dia após dia.
+
+Era um dia como todos os outros, então como de costume os irmãos tomaram o café e seguiram o caminho que diariamente faziam para ampliar seus conhecimentos. Eles estudavam em uma das escolas públicas de Yearling, uma pequena cidade do interior.
+
+Enquanto Peter relia a carta de seu avô pelo caminho, Débora, à frente, se aprofundava no mundo criado por sua imaginação. Ela cantarolava pequenos encantos e seres inimagináveis faziam parte de seu dia-a-dia. E o jovem garoto apenas lançava um olhar desalento sobre a menina.
+
+Ouve-se o sino, já era o alerta do fim das aulas. Voltando pelo mesmo caminho, Peter alerta a irmá para não se dispersar de seus olhos. Por um curto tempo, ele se desconectou de sua irmá quando ouviu o cantar de uma coruja negra de olhos azuis, que estava sobre um tronco de árvore recém-cortado. Como hipnose, o canto da ave fez com que ele, por alguns instantes, parasse no tempo. E Débora, a doce menina de longos cabelos dourados, sumiu como o sereno após o raiar do sol.
+
+Após perceber o desaparecimento da irmã, Peter lança vários ardentes chamados e deixa escorrer pelo rosto a amarga lágrima do desespero. O medo e inúmeros outros sentimentos tomaram conta do garoto, que já de tanto gritar pelo nome da irmá começa a ficar rouco. As lágrimas começavam a molhar a carta de seu avô, que ele sentimentalmente segurava em mãos. Ainda de olhos fechados, ele começa a se lembrar dos momentos ao lado da irmá e foi uma dessas rememorações que fez com que ele abrisse os olhos e enxergasse a realidade. Ele viu a imagem da doce ternura que o avô representava, náo somente para ele e sim também para irmá. Recordações o envolveram, então ele compreendeu o porquê de sua irmá nunca ter derramado uma lágrima se quer após a partida do avô. Ela dizia com sorriso no rosto que a morte fazia parte de uma evolução que todos os seres vivos irão passar. Débora possuía uma forte luz de esperança e imaginação, o que não a deixava desamparada.
+
+Então, de cabeça erguida, ele se levantou do chão, enxugou as lágrimas e com palavras ardentes e altas gritou.
+
+"Estou disposto a acreditar naquilo que meus olhos não possam perceber, estou disposto a ouvir o que meu coração quer conseguir, posso ser infame e até mesmo arrogante, mas mudar é algo que vou conseguir."
+
+Em instantes, a noite tomou conta do dia. Como em um dia de temporal, um forte vento arremessou o garoto sobre uma pedra fazendo com que ele perdesse a consciência.
+
+Horas se passaram e Peter ainda estava inconsciente de cabeça sobreposta a uma rocha enlameada. Um pequeno corte marcou uma de suas sobrancelhas, que estava encharcada de sangue fino e doce.
+
+Quando ele recobrou os sentidos, com uma visão meio trêmula, ele viu sua irmá parada diante de um tronco de árvore levemente alinhado àquele em que se encontrava a coruja. Ela parecia estar observando algo incrivelmente deslumbrante. Um pouco tonto ele se levantou e foi ao encontro da irmá. Foi um abraço tão quente e amoroso que fez com que ele dissesse pela primeira vez o quanto a amava.
+
+A Orla de Slamer
+
+O que se dizia guardião estendeu as mãos e, como se fosse uma ilusão, os olhos de Peter e da irmá começaram a ver imagens de pessoas e lugares que eles jamais viram. Eles encetaram a ouvir a voz do guardião ao longe, identicamente quando se encontra e conversa com alguém em um determinado sonho.
+
+"Débora e Peter, eu vou começar do princípio, quando ainda não existiam os mundos paralelos, quando apenas havia um só lado do universo, conhecido como primeiro plano. Atualmente, são infinitos números de mundos distintos que ficam situados lado a lado, é como se todos estivessem conectados por algum fio magnético ou similar. Deixem-me esclarecer melhor: esses mundos são futuros, presentes e passados, que foram seguidos com ideias e atos diferentes uns dos outros. Vou dar um exemplo: imaginem se o avô de vocês não tivesse morrido de onde vocês vieram, isso ocasionaria em um futuro diferente do que será agora.
+
+Muitas pessoas dizem terem visto imagens de lugares ou cenas não ainda acontecidas ou presenciadas, é popularmente conhecido como dejavu, mas na realidade essas pessoas estão recebendo lembranças do seu outro eu que está em algum dos distintos universos paralelos. Onde vocês estão agora é um desses mundos."
+
+"Então você está querendo dizer que o meu avô ainda pode estar vivo aqui?" - disse Peter, com um olhar de esperança.
+
+"Não posso responder a sua pergunta no momento" – respondeu o guardião, já dando retorno ao que ele estava falando. "Mas existem pessoas que podem ver e até mesmo se comunicar com esses diversos lugares, como é o caso de Débora que nos viu uma vez, não é verdade, senhorita?"
+
+"Eu, como assim?"
+
+"Muitas vezes, quando alguém passa por uma situação de risco e sobrevive, as lembranças e memórias de seu outro eu são transmitidas até você por um sonho, ou em um estado de coma."
+
+"Agora que o senhor me falou, lembrei-me de algo: cerca de cinco anos atrás, meus pais foram convidados para uma reunião na casa do prefeito da nossa antiga cidade. Meu pai trabalhava com finanças e minha mãe era secretária geral da antiga empresa de nossa família, que fazia a cidade ter lucros. Ao redor da casa, havia um lago muito grande e descuidadamente eu caí. Como naquela época eu ainda não havia feito minhas aulas de natação, comecei a me afogar e foi nesse estado de perca de consciência que eu vi um lugar cheio de pássaros azuis e um enorme castelo branco, depois disso somente acordei no outro dia com meus pais e Peter ao meu redor. Esse lugar que vi era aqui?"
+
+"Exatamente, você somente não voltou a nos ver por causa do encantamento lançado por um mago que hoje habita as redondezas. Ele queria impedir a vinda de vocês até aqui."
+
+Os Luminírios e a Trava de Denísia
+
+Neste pequeno tempo de conversa todos já estavam do lado de fora do castelo. Débora também não se conteve ao ver o jardim, seus olhos irradiavam alegria. Ela, de frente para o monumental recinto, se deslumbra com a cúpula central, que era recoberta de prismas alinhadamente. A luz traspassava através da cúpula criando desenhos aéreos policromados.
+
+Átila pediu que todos se dirigissem para um canto do jardim que era arborizado. Debaixo de um estaleiro recoberto de plantas trepadeiras, eles se acomodaram ao redor de uma mesa redonda, feita de vidro cristalizado com detalhes azuis. Eles comeram algo e sentindo a brisa fresca no rosto, os irmãos Richt começam a querer cochilar sobre as cadeiras confortavelmente estofadas de algodão.
+
+Átila dispersou o sono deles, comentando com que iriam chegar até Órion. "Ária, imagino que não haverá problemas de como você irá chegar a Órion." "De maneira alguma", respondeu a feiticeira. "Marley, o seu hipomorfo alado já está recuperado. O cavalo de Soltesner, darei um jeito de aprimorá-lo. Já para vocês, irmãos Richt, irei oferecer os meus leais Sarmaneses." "Quem?" - indagou Peter. "Roy e Croy."
+
+Peter ergue uma de suas sobrancelhas três vezes e ruidosamente descarta a opção. "Queira me desculpar, mas sobre esses galináceos eu não subo nem sendo hipnotizado."
+
+Todos acenaram as cabeças fazendo ar de indignação e, inesperadamente, Croy abre a boca pela primeira vez perante os protetores. "Escute aqui, seu fedelho prepotente, primeiramente você deveria ter um pouco mais de gratidão e agradecer a mim e ao meu irmão."
+
+O Primeiro Encanto Incêndio Illu Aere
+
+Débora tenta acordar o irmão com safanões. "Peter, Peter, acorda, temos que ir."
+
+Ele acorda suado, como se tivesse acabado de sair de dentro de uma sauna. Com os olhos arregalados e vermelhos, ele não hesita em dar um apertado abraço na irmã.
+
+"O que houve, Peter? Foi o pesadelo da noite passada?" - espantada pela reação do irmão, ela busca explicações. Com pouca voz, ele fala angustiadamente. "Eu nunca vou te deixar, irei te proteger com a minha vida." "Calma, me conte com o que sonhou." "Desta vez parecia tão real, eu o ouvi dizer coisas banais." Ele não conseguia se largar da irmá, que já estava ficando sufocada. "Dizer o quê?" "Ele quer nos matar, Débora, ele quer nos impedir de ir até Órion."
+
+A menina não contém as palavras e fala como se o medo fosse algo possível de se jogar fora. "Se ele nos quer, que venha buscar então. Jamais irei entregar para ele o direito de consolidar seu reino de escuridão, sem ao menos eu antes tentar."
+
+Peter se desgarra de Débora e, olhando diretamente em seus olhos, expele palavras de ira. "Você está doida, quer entregar a sua vida de mãos beijadas." "Eu não disse isso, somente falei que não vou desistir, é diferente. Mas deixe isso para a hora certa, vamos indo."
+
+Que surjam os Krotons
+
+"Lorde Cruheeeell, lorde Cruheeeell."
+
+"Cale-se, seu estorvo imprestável. Por que tanta gritaria?" "Desculpe-me, lorde supremo, mas é que o garoto nojento liberou a primeira tranca mágica." "Como assim, Putrico?" "Ele conseguiu aniquilar todas as Bluemady que o senhor enviou e, além do mais, ele tem posse de dois Luminírios." "Isso é impossível, seu troço irritante. Mas é verdade, meu lorde."
+
+Enquanto Putrico, um ser totalmente deformado criado por Cruhell, estava de joelhos frente ao seu dono, o guardião de Órion colocava sua mente diabólica para se esquentar.
+
+O lorde das trevas estava sentado bem ao alto de uma enorme escadaria onde estava o seu trono feito de ossos. Com sua pele pálida e seus negros cabelos ondulados, ele encarava Putrico.
+
+A aparência de Putrico era asquerosa, seus olhos eram de cor distinta, um azul e o outro branco, uma pele vermelha escamosa e sua altura não passava de um metro. Sua cauda era defeituosa com um corte cicatrizado e, além de tudo, ele possuía poucos fios de cabelo.
+
+Ódio, amor e tristeza
+
+Ainda no caminho Malfeito, Roy se depara com uma moeda no chão e sem pensar a pega.
+
+"Ei, me bota no chão!" "Quem disse isso?" – assustado, pergunta Roy. "Fui eu, oras" – responde a moeda, pulando. "Você fala?" "Não! Estou cantando sertanejo, olha só: 'Neste pequeno cantinho do sertão...'. É lógico que eu falo. Agora me bota no chão." "Certo, desculpe-me. Mas por que você estava no chão jogado?" "Quem disse que eu estava jogado? Eu estava esperando algum viajante passar para me levar até Órion."
+
+"E o que o senhor quer com Órion?" – chegando perto da confusão, pergunta Peter. "Primeiramente, quem são vocês?" "Bem, meu nome é Peter, aquele é Soltesner, Marley, o que te achou se chama Roy e aquele lá é Croy, mas não se importe com ele – esnobando o Sarmenes, Peter apresenta todos." "O que você quis dizer com 'aquele lá', hein, moleque?" – enfurecido, grita Croy.
+
+"Bom, como estávamos dizendo, senhor moeda – novamente Peter ignora Croy –, qual é o nome do senhor?" A pequena moeda de cor prateada, com bigodes e duas pernas, disse: "Meu nome é Cruzado, estou querendo ir para Órion, pois fiquei sabendo que é neste reino que mora Cruhell."
+
+A transferência - Surge uma nova feiticeira
+
+"Nossa! Este lugar, além de ser escuro, fede a urina de rato." "Pare de reclamar, Croy – fala Peter –, só podia ser desse jeito. Estamos na entrada de Órion."
+
+O Subtérreo de Gema não possuía nenhuma claridade e o túnel era muito extenso. Fazia cerca de uma hora que eles estavam andando e cada vez o lugar ficava mais baixo e apertado.
+
+"Acho que pisei numa ratazana" – grita Croy. "Por favor, Croy, você poderia tirar o pé de cima do meu? – alterado, pede Marley." "Sim, me desculpa." "Olhem, posso ver um pouco de claridade mais a frente, devemos estar saindo desse asqueroso lugar" – fala Soltesner.
+
+Na verdade, não era a saída e sim um senhor que estava sentado no chão segurando uma vela acesa. "Quem é o senhor?" – pergunta Peter. "Meu nome é Elisarth, sou o vigia do Subtérreo." "Mas o que o senhor está vigiando?" – continua Peter. "Eu controlo a entrada e a saída desse túnel, para que não haja congestionamento. Apesar de eu estar no meio do caminho, sei perfeitamente quem chegará a mim primeiro. Para não causar tumulto aqui dentro, eu analiso se pode ou não passar."
+
+Irmão e irmã, unidos em um só laço
+
+Peter conseguiu se restaurar graças àquele que se escondia na cortina de luz. Apesar de estar curado, ele ainda continuava perdido. Ele se sentia o pior irmão do mundo. Seus amigos estavam gravemente feridos e sua irmã praticamente morta. Ele não tinha forças para lutar mais.
+
+As suas luvas se ativaram sozinhas e o mesmo animal que as entregou para o garoto apareceu.
+
+"Como pode estar pensando em desistir? Eu lhe ofereci a minha ajuda, a minha proteção e, mesmo assim, quer abandonar aquilo que está quase conseguindo." "Eu agradeço pela sua ajuda, mas a minha motivação de lutar está quase morta. A pessoa que eu tanto queria proteger se agoniza em seus últimos suspiros." "Por isso mesmo você tem que terminar aquilo que começou, senão tudo que fez terá sido em vão. A morte de sua pessoa amada terá sido à toa."
+
+Um adeus perdido no tempo
+
+Novamente os irmãos descem as escadarias para se encontrarem com Átila. No mesmo lugar, estava ele com o seu longo chapéu e sua barba grisalha.
+
+"Podem se sentar" – diz o guardião, apontando para mesa. Todos estavam reunidos, a despedida é mais dura do que se possa imaginar.
+
+"Primeiramente, gostaria de agradecer a todos por terem conseguido banir o mal que estava nos espreitando. Vocês lutaram, se feriram e choraram para proteger a todos. Até mesmo aqueles que não queriam ir, mostraram ter valor e talento – disse ele olhando para Peter –, vocês são merecedores do título de Guardiões Reais."
+
+"O que seria isso?" – para não perder o costume, pergunta Peter. "Estava esperando você perguntar, meu caro Peter. Esse título somente recebe aqueles que vão até o fim sem desistirem ou voltarem atrás. Esse título mostra que você é um dos melhores seres iluminados que existem."
+
+"Mas aqui estamos para nos despedir, pois aqui se encerra a dura e difícil jornada da Batalha Obscuritudine da Luce."
+`
           }
         ];
-
-        const MAP_STRUCTURE = [
-          { id: 'm1', title: 'Solcris: O Convite', phases: 1, gameType: 'Quiz', description: "O início da jornada." }, 
-          { id: 'm2', title: 'A Orla de Slamer', phases: 1, gameType: 'Memory', description: "Conheça seus aliados." },
-          { id: 'm3', title: 'Luminírios & Denísia', phases: 1, gameType: 'DragAndDrop', description: "Encontre os objetos de poder." },
-          { id: 'm4', title: 'O Primeiro Encanto', phases: 1, gameType: 'SpellTyper', description: "Lance feitiços contra as plantas!" },
-          { id: 'm5', title: 'Krotons e Cruhell', phases: 1, gameType: 'Battle', description: "Batalha final contra as sombras." },
-          { id: 'm6', title: 'Epílogo: A Página Rasgada', phases: 1, gameType: 'Unscramble', description: "Restaure a mensagem final." },
-        ];
-
-        const QUIZ_DATA = {
-            question: "Qual o nome do fenômeno que transportou Peter e Débora para Inária?",
-            options: ["Solcris", "Eclipse Lunar", "Tempestade Solar", "Buraco Negro"],
-            correctAnswer: "Solcris",
-            hint: "Ocorre quando o círculo de transporte é ativado pela luz."
-        };
-
-        const DRAG_DATA = {
-            pairs: [
-              { id: 1, target: "Átila", description: "Guardião" },
-              { id: 2, target: "Slamer", description: "Criador do Livro" },
-              { id: 3, target: "Órion", description: "Reino Sombrio" },
-              { id: 4, target: "Inária", description: "Terra de Luz" },
-            ],
-            sources: [
-                { id: 1, content: "Guardião" },
-                { id: 2, content: "Terra de Luz" },
-                { id: 3, content: "Criador do Livro" },
-                { id: 4, content: "Reino Sombrio" },
-            ]
-        };
-
-        const MEMORY_CARDS = [
-            { id: 1, icon: Icons.User, name: "Peter" },
-            { id: 2, icon: Icons.Sun, name: "Débora" },
-            { id: 3, icon: Icons.Shield, name: "Soltesner" },
-            { id: 4, icon: Icons.Feather, name: "Ária" },
-            { id: 5, icon: Icons.Ghost, name: "Marley" },
-            { id: 6, icon: Icons.Sword, name: "Slamer" },
-        ];
-
-        const SPELL_DATA = [
-            { spell: "Susccipio", meaning: "A primeira palavra do livro." },
-            { spell: "Incêndio Illu Aere", meaning: "Fogo azul contra as plantas." },
-            { spell: "Naturae Imperium", meaning: "Comando da natureza." }
-        ];
-
-        const BATTLE_DATA = {
-            enemyName: "Cruhell",
-            enemyMaxHp: 100,
-            playerMaxHp: 100
-        };
-
-        const PUZZLE_DATA = {
-            correctOrder: [
-                "Quando fundi o livro",
-                "ao meu corpo,",
-                "ele se tornou",
-                "parte de mim."
-            ],
-            scrambled: [
-                { id: 'p3', text: "ele se tornou" },
-                { id: 'p1', text: "Quando fundi o livro" },
-                { id: 'p4', text: "parte de mim." },
-                { id: 'p2', text: "ao meu corpo," },
-            ]
-        };
 
         const MOCK_RANKING = [
           { rank: 1, name: 'MestreÁtila', xp: 8200, isSelf: false },
@@ -191,6 +287,236 @@
             { icon: Icons.Layers, text: "Desbloqueie novos livros vencendo." },
             { icon: Icons.Zap, text: "Torne-se um Guardião Real." },
         ];
+
+        // ====================================================================
+        // --- MOTOR DE GERAÇÃO DE FASES (BOOK ENGINE) - VERSÃO 2.0 ---
+        // ====================================================================
+
+        const LORE_DATABASE = {
+            sentences: [
+                "A magia reside na alma", "O livro escolhe o mago", "Sombras temem a luz", 
+                "Inária é nossa casa", "Slamer protege o reino", "O portal foi aberto",
+                "Runas contam histórias", "Fogo queima o medo", "Água cura a dor",
+                "Vento traz mudanças", "Terra guarda segredos", "O tempo é ilusão",
+                "Coragem define o herói", "Sussurros no escuro", "A chave é a mente",
+                "Olhe além do véu", "O destino não espera", "Forje seu caminho",
+                "A luz revela a verdade", "O silêncio fala alto"
+            ],
+            spells: [
+                { spell: "Ignis", meaning: "Fogo" }, { spell: "Aqua", meaning: "Água" },
+                { spell: "Ventus", meaning: "Vento" }, { spell: "Terra", meaning: "Terra" },
+                { spell: "Lux", meaning: "Luz" }, { spell: "Umbra", meaning: "Sombra" },
+                { spell: "Sano", meaning: "Curar" }, { spell: "Fortis", meaning: "Força" },
+                { spell: "Celer", meaning: "Rapidez" }, { spell: "Scutum", meaning: "Escudo" },
+                { spell: "Tempus", meaning: "Tempo" }, { spell: "Vis", meaning: "Poder" },
+                { spell: "Mutare", meaning: "Mudar" }, { spell: "Revelio", meaning: "Revelar" },
+                { spell: "Silentium", meaning: "Silêncio" }, { spell: "Lumen", meaning: "Clarão" },
+                // Novos Feitiços do Livro
+                { spell: "Suscipio", meaning: "Iniciar" }, { spell: "Volare", meaning: "Voar" },
+                { spell: "Creazione Vitale", meaning: "Cura Celular" }, { spell: "Dry Solitudine", meaning: "Secar" }
+            ],
+            concepts: [
+                { term: "Mana", def: "Energia Mágica" }, { term: "Grimório", def: "Livro de Feitiços" },
+                { term: "Cajado", def: "Canalizador" }, { term: "Poção", def: "Líquido Mágico" },
+                { term: "Orbe", def: "Esfera de Poder" }, { term: "Runa", def: "Símbolo Antigo" },
+                { term: "Alquimia", def: "Transmutação" }, { term: "Éter", def: "Quinto Elemento" },
+                { term: "Golem", def: "Servo Artificial" }, { term: "Drusa", def: "Cristal Bruto" },
+                { term: "Pergaminho", def: "Papel Mágico" }, { term: "Caldeirão", def: "Vaso de Poções" },
+                // Conceitos do Livro
+                { term: "Solcris", def: "Fenômeno de Luz" }, { term: "Criatiun", def: "Selo Mental" },
+                { term: "Sarmaneses", def: "Protetores Alados" }, { term: "Incandinários", def: "Pássaros de Fogo" }
+            ],
+            quizQuestions: [
+                { q: "Qual elemento oposto ao Fogo?", a: "Água", opts: ["Água", "Terra", "Ar"] },
+                { q: "O que guarda feitiços?", a: "Grimório", opts: ["Grimório", "Escudo", "Espada"] },
+                { q: "Quem vive em Inária?", a: "Magos", opts: ["Magos", "Alienígenas", "Robôs"] },
+                { q: "Fonte de toda magia?", a: "Mana", opts: ["Mana", "Ouro", "Ferro"] },
+                { q: "O que um alquimista busca?", a: "Pedra Filosofal", opts: ["Pedra Filosofal", "Cobre", "Madeira"] },
+                { q: "Qual cor representa cura?", a: "Verde", opts: ["Verde", "Preto", "Roxo"] },
+                { q: "Onde se guardam poções?", a: "Frascos", opts: ["Frascos", "Bolsos", "Sapatos"] },
+                { q: "Símbolo da sabedoria?", a: "Coruja", opts: ["Coruja", "Sapo", "Rato"] },
+                // Perguntas do Livro
+                { q: "Qual o nome do vilão?", a: "Cruhell", opts: ["Cruhell", "Slamer", "Átila"] },
+                { q: "O que são Sarmaneses?", a: "Protetores", opts: ["Protetores", "Inimigos", "Plantas"] },
+                { q: "Nome da irmã de Peter?", a: "Débora", opts: ["Débora", "Ária", "Sônia"] },
+                { q: "Quem criou o livro dourado?", a: "Arnold Slamer", opts: ["Arnold Slamer", "Paulo Richt", "Merlin"] }
+            ],
+            bosses: ["Guardião de Pedra", "Espectro do Lago", "Golem de Ferro", "Sombra Errante", "Dragão de Cinzas", "Cavaleiro Vazio", "Cruhell", "Proácia Amarela", "Proácia Negra"],
+            riddles: [
+                { q: "Tenho cidades, mas não casas. Tenho montanhas, mas não árvores. O que sou?", a: "Mapa" },
+                { q: "Quanto mais você tira de mim, maior eu fico. O que sou?", a: "Buraco" },
+                { q: "Pertenço a você, mas os outros usam mais que você.", a: "Nome" },
+                { q: "Tenho chaves, mas não abro portas.", a: "Piano" },
+                { q: "O que sobe, mas nunca desce?", a: "Idade" }
+            ],
+            mathProblems: [
+                { q: "3 Poções + 2 Espadas", a: 5 }, { q: "10 Runas - 4 Quebradas", a: 6 },
+                { q: "2 Magos x 3 Cajados", a: 6 }, { q: "12 Ovos / 2 Ninhos", a: 6 },
+                { q: "5 Cristais + 5 Cristais", a: 10 }, { q: "20 Mana - 5 Gasto", a: 15 }
+            ]
+        };
+
+        // CÁLCULO DE FASES
+        const calculateTotalLevels = (pages) => {
+            if (pages <= 50) return Math.max(5, Math.ceil(pages * 0.5)); // Mínimo 5 fases para livros muito curtos
+            if (pages <= 100) return 25 + Math.ceil((pages - 50) * 0.2);
+            if (pages <= 200) return 35 + Math.ceil((pages - 100) * 0.1);
+            if (pages <= 400) return 45 + Math.ceil((pages - 200) * 0.075);
+            if (pages <= 700) return 60 + Math.ceil((pages - 400) * 0.067);
+            if (pages <= 1000) return 80 + Math.ceil((pages - 700) * 0.067);
+            return 100; // Limite máximo
+        };
+
+        // GERAÇÃO DE DADOS DE FASE
+        const generateLevelData = (type, levelIndex) => {
+            const offset = levelIndex * 2;
+            
+            if (type === 'Unscramble') {
+                const idx = levelIndex % LORE_DATABASE.sentences.length;
+                const sentence = LORE_DATABASE.sentences[idx];
+                const parts = sentence.split(" ").map((word, i) => ({ id: `p${i}`, text: word }));
+                return { correctOrder: sentence.split(" "), scrambled: [...parts].sort(() => Math.random() - 0.5) };
+            }
+            
+            if (type === 'SpellTyper') {
+                const start = offset % LORE_DATABASE.spells.length;
+                return [
+                    LORE_DATABASE.spells[start],
+                    LORE_DATABASE.spells[(start + 1) % LORE_DATABASE.spells.length],
+                    LORE_DATABASE.spells[(start + 2) % LORE_DATABASE.spells.length]
+                ];
+            }
+
+            if (type === 'DragAndDrop') {
+                const pairs = [];
+                const sources = [];
+                for(let i=0; i<4; i++) {
+                    const item = LORE_DATABASE.concepts[(offset + i) % LORE_DATABASE.concepts.length];
+                    pairs.push({ id: i, target: item.term, description: item.def });
+                    sources.push({ id: i, content: item.def });
+                }
+                return { pairs, sources: sources.sort(() => Math.random() - 0.5) };
+            }
+
+            if (type === 'Quiz') {
+                const qData = LORE_DATABASE.quizQuestions[levelIndex % LORE_DATABASE.quizQuestions.length];
+                return {
+                    question: qData.q,
+                    options: [...qData.opts, "Nada"].sort(() => Math.random() - 0.5).slice(0,4),
+                    correctAnswer: qData.a,
+                    hint: "Concentre-se."
+                };
+            }
+
+            if (type === 'Battle') {
+                return {
+                    enemyName: LORE_DATABASE.bosses[(levelIndex / 20) % LORE_DATABASE.bosses.length | 0],
+                    enemyMaxHp: 100 + (levelIndex * 15),
+                    playerMaxHp: 100 + (levelIndex * 5)
+                };
+            }
+
+            if (type === 'Memory') {
+                 const iconsPool = [Icons.Feather, Icons.Zap, Icons.Heart, Icons.Star, Icons.Sun, Icons.Shield, Icons.Sword, Icons.Ghost, Icons.BookOpen];
+                 const levelIcons = [];
+                 for(let i=0; i<6; i++) {
+                     levelIcons.push(iconsPool[(levelIndex + i) % iconsPool.length]);
+                 }
+                 return levelIcons.map((ic, i) => ({ id: i, icon: ic, name: `Item ${i}` }));
+            }
+
+            if (type === 'OddOneOut') {
+                const mainIcon = Icons.Sun;
+                const oddIcon = Icons.Star;
+                const grid = Array(9).fill(mainIcon);
+                const oddIndex = Math.floor(Math.random() * 9);
+                grid[oddIndex] = oddIcon;
+                return { grid, oddIndex };
+            }
+
+            if (type === 'MathLock') {
+                const problem = LORE_DATABASE.mathProblems[levelIndex % LORE_DATABASE.mathProblems.length];
+                return problem;
+            }
+
+            if (type === 'Riddle') {
+                const riddle = LORE_DATABASE.riddles[levelIndex % LORE_DATABASE.riddles.length];
+                return riddle;
+            }
+
+            if (type === 'Simon') {
+                const colors = ['red', 'blue', 'green', 'yellow'];
+                const sequence = [];
+                for(let i=0; i<4 + Math.floor(levelIndex/10); i++) sequence.push(colors[Math.floor(Math.random()*4)]);
+                return { sequence };
+            }
+
+            if (type === 'Cipher') {
+                const words = ["MAGIA", "LIVRO", "REINO", "LUZ", "PODER"];
+                const word = words[levelIndex % words.length];
+                const shift = (char) => String.fromCharCode(char.charCodeAt(0) + 1);
+                const ciphered = word.split('').map(shift).join('');
+                return { original: word, ciphered: ciphered };
+            }
+
+            if (type === 'Reaction') {
+                return { delay: 1000 + Math.random() * 2000 };
+            }
+
+            return {};
+        };
+
+        const generateBookStructure = (book) => {
+            const totalLevels = calculateTotalLevels(book.pageCount);
+            const levels = [];
+            
+            const gameTypes = [
+                'Unscramble', 'DragAndDrop', 'SpellTyper', 'Quiz', 
+                'Memory', 'OddOneOut', 'MathLock', 'Riddle',
+                'Simon', 'Cipher', 'Reaction', 'Battle'
+            ];
+
+            let lastType = '';
+
+            for (let i = 1; i <= totalLevels; i++) {
+                let type = '';
+                let title = `Página ${Math.ceil(i / (totalLevels/book.pageCount))}`;
+                let desc = "Desafio mágico.";
+
+                if (i % 15 === 0) {
+                    type = 'Battle';
+                    title = "Guardião do Capítulo";
+                    desc = "Sobreviva ao teste.";
+                } else {
+                    let availableTypes = gameTypes.filter(t => t !== 'Battle' && t !== lastType);
+                    type = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+                    
+                    if(type === 'Unscramble') desc = "Ordene a frase.";
+                    if(type === 'DragAndDrop') desc = "Conecte o saber.";
+                    if(type === 'SpellTyper') desc = "Escreva o feitiço.";
+                    if(type === 'Quiz') desc = "Responda rápido.";
+                    if(type === 'Memory') desc = "Memorize.";
+                    if(type === 'OddOneOut') desc = "Ache o intruso.";
+                    if(type === 'MathLock') desc = "Calcule a magia.";
+                    if(type === 'Riddle') desc = "Decifre o enigma.";
+                    if(type === 'Simon') desc = "Siga a luz.";
+                    if(type === 'Cipher') desc = "Quebre o código.";
+                    if(type === 'Reaction') desc = "Defenda-se!";
+                }
+
+                lastType = type; 
+
+                levels.push({
+                    id: `level_${book.id}_${i}`,
+                    title: `${i}. ${title}`,
+                    phases: 1,
+                    gameType: type,
+                    description: desc,
+                    data: generateLevelData(type, i)
+                });
+            }
+            return levels;
+        };
 
         // --- COMPONENTES AUXILIARES ---
         
@@ -335,37 +661,39 @@
             );
         };
 
-        const QuizGame = ({ onComplete, onMistake }) => {
+        // --- COMPONENTES DE JOGO ---
+
+        const QuizGame = ({ onComplete, onMistake, data }) => {
             const [selected, setSelected] = useState(null);
             const [feedback, setFeedback] = useState(null);
             const handleConfirm = () => {
                 if (!selected) return;
-                const isCorrect = selected === QUIZ_DATA.correctAnswer;
+                const isCorrect = selected === data.correctAnswer;
                 setFeedback(isCorrect ? 'correct' : 'wrong');
                 if (!isCorrect) onMistake();
                 setTimeout(() => { if (isCorrect) onComplete(); else { setSelected(null); setFeedback(null); } }, 1500);
             };
             return (
-                <div className="p-6 h-full flex flex-col">
-                    <div className="mb-6"><span className="text-xs font-bold text-blue-500 uppercase">Quiz</span><h2 className="text-xl font-bold text-slate-800 mt-2">{QUIZ_DATA.question}</h2></div>
+                <div className="p-6 h-full flex flex-col animate-in">
+                    <div className="mb-6"><span className="text-xs font-bold text-blue-500 uppercase">Quiz</span><h2 className="text-xl font-bold text-slate-800 mt-2">{data.question}</h2></div>
                     <div className="space-y-3 flex-grow">
-                        {QUIZ_DATA.options.map((opt, idx) => (
-                            <button key={idx} onClick={() => !feedback && setSelected(opt)} className={`w-full p-4 rounded-xl text-left font-bold border-2 transition-all ${feedback === 'correct' && opt === QUIZ_DATA.correctAnswer ? 'bg-green-100 border-green-500 text-green-700' : feedback === 'wrong' && selected === opt ? 'bg-red-100 border-red-500 text-red-700' : selected === opt ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-slate-200 text-slate-600'}`}>{opt}</button>
+                        {data.options.map((opt, idx) => (
+                            <button key={idx} onClick={() => !feedback && setSelected(opt)} className={`w-full p-4 rounded-xl text-left font-bold border-2 transition-all ${feedback === 'correct' && opt === data.correctAnswer ? 'bg-green-100 border-green-500 text-green-700' : feedback === 'wrong' && selected === opt ? 'bg-red-100 border-red-500 text-red-700' : selected === opt ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-slate-200 text-slate-600'}`}>{opt}</button>
                         ))}
                     </div>
-                    <button onClick={handleConfirm} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl">Confirmar</button>
+                    <button onClick={handleConfirm} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg active:scale-95 transition">Confirmar</button>
                 </div>
             );
         };
 
-        const MemoryGame = ({ onComplete }) => {
+        const MemoryGame = ({ onComplete, data }) => {
             const [cards, setCards] = useState([]);
             const [flipped, setFlipped] = useState([]);
             const [matched, setMatched] = useState([]);
             useEffect(() => {
-                const deck = [...MEMORY_CARDS, ...MEMORY_CARDS].sort(() => Math.random() - 0.5).map((card, index) => ({ ...card, uniqueId: index }));
+                const deck = [...data, ...data].sort(() => Math.random() - 0.5).map((card, index) => ({ ...card, uniqueId: index }));
                 setCards(deck);
-            }, []);
+            }, [data]);
             const handleCardClick = (id) => {
                 if (flipped.length === 2 || flipped.includes(id) || matched.includes(cards.find(c => c.uniqueId === id).id)) return;
                 const newFlipped = [...flipped, id];
@@ -376,21 +704,20 @@
                     if (card1.id === card2.id) {
                         setMatched([...matched, card1.id]);
                         setFlipped([]);
-                        if (matched.length + 1 === MEMORY_CARDS.length) setTimeout(onComplete, 1000);
+                        if (matched.length + 1 === data.length) setTimeout(onComplete, 1000);
                     } else { setTimeout(() => setFlipped([]), 1000); }
                 }
             };
             return (
-                <div className="p-4 h-full flex flex-col">
+                <div className="p-4 h-full flex flex-col animate-in">
                     <h2 className="text-center font-black text-slate-700 mb-4">Encontre os Pares</h2>
                     <div className="grid grid-cols-3 gap-3 flex-grow content-center">
                         {cards.map((card) => {
                             const isFlipped = flipped.includes(card.uniqueId) || matched.includes(card.id);
                             const IconComponent = card.icon;
-                            if (!IconComponent) return null; // Proteção contra ícones faltantes
                             return (
-                                <button key={card.uniqueId} onClick={() => handleCardClick(card.uniqueId)} className={`aspect-square rounded-xl flex items-center justify-center transition-all duration-500 transform ${isFlipped ? 'bg-yellow-400 rotate-0' : 'bg-slate-200 rotate-y-180'}`}>
-                                    {isFlipped ? <div className="flex flex-col items-center animate-in zoom-in"><IconComponent size={24} className="text-white mb-1" /><span className="text-[8px] font-bold text-yellow-900 uppercase">{card.name}</span></div> : <Icons.HelpCircle className="text-slate-300" />}
+                                <button key={card.uniqueId} onClick={() => handleCardClick(card.uniqueId)} className={`aspect-square rounded-xl flex items-center justify-center transition-all duration-500 transform shadow-sm ${isFlipped ? 'bg-yellow-400 rotate-0' : 'bg-slate-200 rotate-y-180'}`}>
+                                    {isFlipped ? <IconComponent size={24} className="text-white" /> : <Icons.HelpCircle className="text-slate-300" />}
                                 </button>
                             )
                         })}
@@ -399,155 +726,326 @@
             );
         };
 
-        const DragDropGame = ({ onComplete }) => {
-            const [targets, setTargets] = useState(DRAG_DATA.pairs.map(p => ({ ...p, assigned: null })));
-            const [options, setOptions] = useState(DRAG_DATA.sources);
+        const DragDropGame = ({ onComplete, data }) => {
+            const [targets, setTargets] = useState(data.pairs.map(p => ({ ...p, assigned: null })));
+            const [options, setOptions] = useState(data.sources);
             const [selectedOption, setSelectedOption] = useState(null);
+            useEffect(() => { setTargets(data.pairs.map(p => ({ ...p, assigned: null }))); setOptions(data.sources); setSelectedOption(null); }, [data]);
             const handleAssign = (targetId) => {
-                if (!selectedOption) return;
-                const newTargets = targets.map(t => t.id === targetId ? { ...t, assigned: selectedOption } : t);
-                const newOptions = options.filter(o => o.id !== selectedOption.id);
-                const oldTarget = targets.find(t => t.id === targetId);
-                if (oldTarget.assigned) newOptions.push(oldTarget.assigned);
-                setTargets(newTargets); setOptions(newOptions); setSelectedOption(null);
-                if (newTargets.every(t => t.assigned && t.assigned.content === t.description)) setTimeout(onComplete, 1000);
+                const target = targets.find(t => t.id === targetId);
+                if (selectedOption) {
+                    const newTargets = targets.map(t => t.id === targetId ? { ...t, assigned: selectedOption } : t);
+                    const newOptions = options.filter(o => o.id !== selectedOption.id);
+                    const oldTarget = targets.find(t => t.id === targetId);
+                    if (oldTarget.assigned) newOptions.push(oldTarget.assigned);
+                    setTargets(newTargets); setOptions(newOptions); setSelectedOption(null);
+                    if (newTargets.every(t => t.assigned && t.assigned.content === t.description)) setTimeout(onComplete, 1000);
+                } else if (target.assigned) {
+                    setOptions([...options, target.assigned]);
+                    setTargets(targets.map(t => t.id === targetId ? { ...t, assigned: null } : t));
+                }
             };
+            const handleReset = () => { setTargets(data.pairs.map(p => ({ ...p, assigned: null }))); setOptions(data.sources); setSelectedOption(null); };
             return (
-                <div className="p-4 h-full flex flex-col">
-                    <h2 className="text-center font-bold text-slate-700 mb-4">Conecte</h2>
-                    <div className="space-y-3 flex-grow">
-                        {targets.map(t => (
-                            <div key={t.id} onClick={() => handleAssign(t.id)} className={`p-4 rounded-xl border-2 border-dashed flex justify-between items-center transition-all ${t.assigned ? 'border-blue-500 bg-blue-50' : 'border-slate-300'}`}>
-                                <span className="font-bold text-slate-600">{t.target}</span>
-                                <div className={`px-3 py-1 rounded text-xs font-bold ${t.assigned ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-400'}`}>{t.assigned ? t.assigned.content : '?'}</div>
-                            </div>
-                        ))}
-                    </div>
-                    <div className="flex flex-wrap gap-2 justify-center mt-4 pb-4">
-                        {options.map(opt => (
-                            <button key={opt.id} onClick={() => setSelectedOption(opt)} className={`px-4 py-2 rounded-full font-bold text-sm border-2 ${selectedOption?.id === opt.id ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>{opt.content}</button>
-                        ))}
-                    </div>
+                <div className="p-4 h-full flex flex-col animate-in">
+                    <div className="flex justify-between items-center mb-4"><h2 className="text-center font-bold text-slate-700">Conecte</h2><button onClick={handleReset} className="text-xs font-bold text-slate-400 flex items-center"><Icons.RefreshCw size={14} className="mr-1"/> Reiniciar</button></div>
+                    <div className="space-y-3 flex-grow">{targets.map(t => (
+                        <div key={t.id} onClick={() => handleAssign(t.id)} className={`p-4 rounded-xl border-2 border-dashed flex justify-between items-center transition-all cursor-pointer ${t.assigned ? 'border-blue-500 bg-blue-50' : 'border-slate-300'}`}><span className="font-bold text-slate-600">{t.target}</span><div className={`px-3 py-1 rounded text-xs font-bold ${t.assigned ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-400'}`}>{t.assigned ? t.assigned.content : '?'}</div></div>
+                    ))}</div>
+                    <div className="flex flex-wrap gap-2 justify-center mt-4 pb-4">{options.map(opt => (
+                        <button key={opt.id} onClick={() => setSelectedOption(opt)} className={`px-4 py-2 rounded-full font-bold text-sm border-2 transition-all active:scale-95 ${selectedOption?.id === opt.id ? 'bg-slate-800 text-white border-slate-800 scale-105' : 'bg-white text-slate-600 border-slate-200'}`}>{opt.content}</button>
+                    ))}</div>
                 </div>
             );
         };
 
-        const SpellTyperGame = ({ onComplete }) => {
+        const SpellTyperGame = ({ onComplete, data }) => {
             const [spellIdx, setSpellIdx] = useState(0);
             const [input, setInput] = useState('');
             const [shake, setShake] = useState(false);
             const handleSubmit = (e) => {
                 e.preventDefault();
-                if (input.toLowerCase().trim() === SPELL_DATA[spellIdx].spell.toLowerCase().trim()) {
-                    setInput('');
-                    if (spellIdx + 1 < SPELL_DATA.length) setSpellIdx(prev => prev + 1); else onComplete();
+                if (input.toLowerCase().trim() === data[spellIdx].spell.toLowerCase().trim()) {
+                    setInput(''); if (spellIdx + 1 < data.length) setSpellIdx(prev => prev + 1); else onComplete();
                 } else { setShake(true); setTimeout(() => setShake(false), 500); }
             };
             return (
-                <div className="p-6 h-full flex flex-col justify-center items-center bg-slate-900 text-white">
-                    <div className="mb-8 text-center">
-                        <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-4"><Icons.Zap className="w-8 h-8 text-white" /></div>
-                        <p className="text-blue-300 font-bold uppercase text-xs mb-2">Feitiço {spellIdx + 1}/{SPELL_DATA.length}</p>
-                        <h2 className="text-2xl font-black mb-2">{SPELL_DATA[spellIdx].spell}</h2>
-                        <p className="text-slate-400 text-sm italic">"{SPELL_DATA[spellIdx].meaning}"</p>
-                    </div>
-                    <form onSubmit={handleSubmit} className="w-full">
-                        <input autoFocus value={input} onChange={e => setInput(e.target.value)} className={`w-full bg-slate-800 border-2 border-slate-700 rounded-xl p-4 text-center font-bold text-lg focus:border-blue-500 focus:outline-none transition-all ${shake ? 'border-red-500 translate-x-2' : ''}`} placeholder="Digite o feitiço..." />
-                        <button type="submit" className="w-full mt-4 py-4 bg-blue-600 rounded-xl font-bold">Lançar</button>
-                    </form>
+                <div className="p-6 h-full flex flex-col justify-center items-center bg-slate-900 text-white animate-in">
+                    <div className="mb-8 text-center"><div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-4"><Icons.Zap className="w-8 h-8 text-white" /></div><p className="text-blue-300 font-bold uppercase text-xs mb-2">Feitiço {spellIdx + 1}/{data.length}</p><h2 className="text-2xl font-black mb-2">{data[spellIdx].spell}</h2><p className="text-slate-400 text-sm italic">"{data[spellIdx].meaning}"</p></div>
+                    <form onSubmit={handleSubmit} className="w-full"><input autoFocus value={input} onChange={e => setInput(e.target.value)} className={`w-full bg-slate-800 border-2 border-slate-700 rounded-xl p-4 text-center font-bold text-lg focus:border-blue-500 focus:outline-none transition-all ${shake ? 'border-red-500 translate-x-2' : ''}`} placeholder="Digite o feitiço..." /><button type="submit" className="w-full mt-4 py-4 bg-blue-600 rounded-xl font-bold shadow-lg active:scale-95 transition">Lançar</button></form>
                 </div>
             );
         };
 
-        const BattleGame = ({ onComplete, onMistake }) => {
-            const [enemyHp, setEnemyHp] = useState(BATTLE_DATA.enemyMaxHp);
-            const [playerHp, setPlayerHp] = useState(BATTLE_DATA.playerMaxHp);
-            const [log, setLog] = useState("Cruhell apareceu!");
+        const BattleGame = ({ onComplete, onMistake, data }) => {
+            const [enemyHp, setEnemyHp] = useState(data.enemyMaxHp);
+            const [playerHp, setPlayerHp] = useState(data.playerMaxHp);
+            const [log, setLog] = useState(data.enemyName + " apareceu!");
             const [turn, setTurn] = useState('player');
-            useEffect(() => { if (enemyHp <= 0) setTimeout(onComplete, 1500); if (playerHp <= 0) onMistake(); }, [enemyHp, playerHp]);
-            const handleAction = (type) => {
-                if (turn !== 'player') return;
-                if (type === 'attack') {
-                    const dmg = Math.floor(Math.random() * 20) + 10;
-                    setEnemyHp(prev => Math.max(0, prev - dmg));
-                    setLog(`Você atacou! -${dmg} HP`);
-                    setTurn('enemy');
-                    setTimeout(() => {
-                        const pDmg = Math.floor(Math.random() * 15) + 5;
-                        setPlayerHp(prev => Math.max(0, prev - pDmg));
-                        setLog(`Cruhell atacou! -${pDmg} HP`);
-                        setTurn('player');
-                    }, 1500);
+            const [battleState, setBattleState] = useState('active');
+
+            useEffect(() => {
+                setEnemyHp(data.enemyMaxHp);
+                setPlayerHp(data.playerMaxHp);
+                setLog(data.enemyName + " apareceu!");
+                setBattleState('active');
+                setTurn('player');
+            }, [data]);
+
+            useEffect(() => {
+                if (battleState !== 'active') return;
+                if (enemyHp <= 0) {
+                    setBattleState('won');
+                    setTimeout(onComplete, 1500);
+                } else if (playerHp <= 0) {
+                    setBattleState('lost');
+                    onMistake();
                 }
+            }, [enemyHp, playerHp, battleState]);
+
+            const enemyTurn = () => {
+                setTurn('enemy');
+                setTimeout(() => {
+                    if (enemyHp <= 0) return; 
+                    const pDmg = Math.floor(Math.random() * 15) + 5;
+                    setPlayerHp(prev => Math.max(0, prev - pDmg));
+                    setLog(`${data.enemyName} atacou! -${pDmg} HP`);
+                    setTurn('player');
+                }, 1500);
             };
+
+            const handleAttack = () => {
+                if (turn !== 'player' || battleState !== 'active') return;
+                const dmg = Math.floor(Math.random() * 20) + 10;
+                setEnemyHp(prev => Math.max(0, prev - dmg));
+                setLog(`Você atacou! -${dmg} HP`);
+                enemyTurn();
+            };
+
+            const handleHeal = () => {
+                if (turn !== 'player' || battleState !== 'active') return;
+                const healAmount = Math.floor(Math.random() * 15) + 10; 
+                setPlayerHp(prev => Math.min(data.playerMaxHp, prev + healAmount));
+                setLog(`Você se curou! +${healAmount} HP`);
+                enemyTurn(); 
+            };
+
+            const handleRetry = () => {
+                setEnemyHp(data.enemyMaxHp);
+                setPlayerHp(data.playerMaxHp);
+                setBattleState('active');
+                setTurn('player');
+                setLog("Tente novamente!");
+            };
+
+            if (battleState === 'lost') {
+                return (
+                    <div className="h-full flex flex-col items-center justify-center bg-red-50 p-6 animate-in">
+                        <Icons.Ghost size={64} className="text-red-500 mb-4" />
+                        <h2 className="text-2xl font-black text-red-700 mb-2">Derrota!</h2>
+                        <p className="text-slate-600 mb-6 text-center">Você caiu em combate.</p>
+                        <button onClick={handleRetry} className="px-6 py-3 bg-red-600 text-white rounded-xl font-bold shadow-lg hover:bg-red-700 transition">Tentar Novamente</button>
+                    </div>
+                );
+            }
+
             return (
-                <div className="h-full flex flex-col bg-slate-50">
+                <div className="h-full flex flex-col bg-slate-50 animate-in">
                     <div className="bg-slate-800 p-6 pb-10 rounded-b-3xl text-white text-center relative shadow-xl">
                         <div className="w-20 h-20 bg-red-900 rounded-full mx-auto flex items-center justify-center mb-3 border-4 border-red-700"><Icons.Ghost size={40} /></div>
-                        <h3 className="font-black text-xl text-red-100">{BATTLE_DATA.enemyName}</h3>
-                        <div className="w-full bg-slate-900 h-3 rounded-full mt-2 overflow-hidden border border-slate-700"><div className="bg-red-500 h-full transition-all duration-500" style={{ width: `${(enemyHp / BATTLE_DATA.enemyMaxHp) * 100}%` }}></div></div>
+                        <h3 className="font-black text-xl text-red-100">{data.enemyName}</h3>
+                        <div className="w-full bg-slate-900 h-3 rounded-full mt-2 overflow-hidden border border-slate-700"><div className="bg-red-500 h-full transition-all duration-500" style={{ width: `${(enemyHp / data.enemyMaxHp) * 100}%` }}></div></div>
                     </div>
                     <div className="flex-grow p-6 flex items-center justify-center"><p className="text-center text-slate-600 font-bold italic animate-pulse">{log}</p></div>
                     <div className="p-6 bg-white border-t border-slate-200">
-                        <div className="flex justify-between items-center mb-4"><span className="font-bold text-slate-700">Peter</span><span className="font-bold text-green-600">{playerHp} HP</span></div>
-                        <button onClick={() => handleAction('attack')} disabled={turn !== 'player'} className="w-full bg-red-100 text-red-600 p-4 rounded-xl font-bold border-2 border-red-200 flex justify-center items-center"><Icons.Flame className="mr-2"/> Atacar</button>
+                        <div className="flex justify-between items-center mb-4"><span className="font-bold text-slate-700">Peter</span><span className={`font-bold ${playerHp < 30 ? 'text-red-500 animate-pulse' : 'text-green-600'}`}>{playerHp}/{data.playerMaxHp} HP</span></div>
+                        <div className="flex gap-3">
+                            <button onClick={handleHeal} disabled={turn !== 'player'} className="flex-1 bg-green-100 text-green-600 p-4 rounded-xl font-bold border-2 border-green-200 flex justify-center items-center shadow-md active:scale-95 transition disabled:opacity-50 hover:bg-green-200"><Icons.Heart className="mr-2" size={20}/> Curar</button>
+                            <button onClick={handleAttack} disabled={turn !== 'player'} className="flex-[2] bg-red-100 text-red-600 p-4 rounded-xl font-bold border-2 border-red-200 flex justify-center items-center shadow-md active:scale-95 transition disabled:opacity-50 hover:bg-red-200"><Icons.Flame className="mr-2" size={20}/> Atacar</button>
+                        </div>
                     </div>
                 </div>
             );
         };
 
-        const UnscrambleGame = ({ onComplete }) => {
-            const [pieces, setPieces] = useState([...PUZZLE_DATA.scrambled]);
-            const [ordered, setOrdered] = useState([]);
+        const UnscrambleGame = ({ onComplete, data }) => {
+            const [pieces, setPieces] = useState([]); const [ordered, setOrdered] = useState([]); const [error, setError] = useState(false);
+            useEffect(() => { setPieces([...data.scrambled]); setOrdered([]); setError(false); }, [data]);
             const handleSelect = (piece) => { setPieces(pieces.filter(p => p.id !== piece.id)); setOrdered([...ordered, piece]); };
-            const handleReset = () => { setPieces([...PUZZLE_DATA.scrambled]); setOrdered([]); };
-            const handleCheck = () => {
-                if (ordered.map(p => p.text).join(" ") === PUZZLE_DATA.correctOrder.join(" ")) onComplete(); else alert("Ordem incorreta.");
-            };
+            const handleCheck = () => { if (ordered.map(p => p.text).join(" ") === data.correctOrder.join(" ")) onComplete(); else { setError(true); setTimeout(() => setError(false), 2000); } };
             return (
-                <div className="p-6 h-full flex flex-col bg-[#fffbeb]">
-                    <div className="text-center mb-6"><h2 className="text-xl font-black text-amber-800">Restaure o Texto</h2></div>
-                    <div className="bg-white border-2 border-amber-200 p-4 rounded-xl min-h-[150px] mb-6 shadow-inner flex flex-wrap content-start gap-2">
-                        {ordered.map((p, idx) => <span key={idx} className="bg-amber-100 text-amber-900 px-2 py-1 rounded border border-amber-300 font-serif">{p.text}</span>)}
-                    </div>
-                    <div className="flex flex-wrap gap-2 justify-center flex-grow content-start">
-                        {pieces.map(p => <button key={p.id} onClick={() => handleSelect(p)} className="bg-white text-slate-700 px-4 py-3 rounded-lg shadow-sm border border-slate-200 font-medium">{p.text}</button>)}
-                    </div>
-                    <div className="flex gap-3 mt-auto"><button onClick={handleReset} className="p-4 bg-slate-200 text-slate-600 rounded-xl font-bold"><Icons.RefreshCw /></button><button onClick={handleCheck} className="flex-grow p-4 bg-amber-500 text-white rounded-xl font-bold">Verificar</button></div>
+                <div className="p-6 h-full flex flex-col bg-[#fffbeb] animate-in"><div className="text-center mb-6"><h2 className="text-xl font-black text-amber-800">Restaure o Texto</h2></div><div className={`bg-white border-2 ${error ? 'border-red-400 animate-shake' : 'border-amber-200'} p-4 rounded-xl min-h-[150px] mb-6 shadow-inner flex flex-wrap content-start gap-2 transition-colors duration-300`}>{ordered.map((p, idx) => <span key={idx} className="bg-amber-100 text-amber-900 px-2 py-1 rounded border border-amber-300 font-serif">{p.text}</span>)}</div><div className="flex flex-wrap gap-2 justify-center flex-grow content-start">{pieces.map(p => <button key={p.id} onClick={() => handleSelect(p)} className="bg-white text-slate-700 px-4 py-3 rounded-lg shadow-sm border border-slate-200 font-medium active:scale-95 transition">{p.text}</button>)}</div><div className="flex gap-3 mt-auto"><button onClick={() => { setPieces([...data.scrambled]); setOrdered([]); }} className="p-4 bg-slate-200 text-slate-600 rounded-xl font-bold shadow-md"><Icons.RefreshCw /></button><button onClick={handleCheck} className="flex-grow p-4 bg-amber-500 text-white rounded-xl font-bold shadow-md">Verificar</button></div></div>
+            );
+        };
+
+        const OddOneOutGame = ({ onComplete, onMistake, data }) => {
+            const [wrongIndices, setWrongIndices] = useState([]); 
+            const handleSelect = (index) => { if (index === data.oddIndex) onComplete(); else { onMistake(); setWrongIndices(prev => [...prev, index]); } };
+            return (
+                <div className="p-6 h-full flex flex-col items-center justify-center bg-slate-50 animate-in">
+                    <h2 className="text-xl font-bold text-slate-700 mb-8">Encontre o Intruso</h2>
+                    <div className="grid grid-cols-3 gap-4">{data.grid.map((Icon, idx) => { const isWrong = wrongIndices.includes(idx); return (<button key={idx} onClick={() => !isWrong && handleSelect(idx)} disabled={isWrong} className={`w-20 h-20 rounded-2xl shadow-md flex items-center justify-center transition-all active:scale-95 ${isWrong ? 'bg-red-100 cursor-not-allowed opacity-50 border-2 border-red-300' : 'bg-white hover:bg-slate-100'}`}>{isWrong ? <Icons.X size={40} className="text-red-400"/> : <Icon size={40} className="text-slate-600" />}</button>); })}</div>
                 </div>
             );
         };
+
+        const MathLockGame = ({ onComplete, onMistake, data }) => {
+            const [answer, setAnswer] = useState('');
+            const check = () => { if (parseInt(answer) === data.a) onComplete(); else { onMistake(); setAnswer(''); } };
+            return (
+                <div className="p-6 h-full flex flex-col justify-center items-center bg-slate-800 text-white animate-in">
+                    <div className="w-24 h-24 bg-slate-700 rounded-full flex items-center justify-center mb-6 shadow-inner"><Icons.Lock size={48} className="text-yellow-400" /></div>
+                    <h2 className="text-2xl font-black mb-2 text-center">Cadeado Arcano</h2>
+                    <p className="text-slate-400 mb-8 text-lg font-mono">{data.q} = ?</p>
+                    <div className="grid grid-cols-3 gap-4 w-full max-w-xs">
+                        {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} onClick={() => setAnswer(prev => prev + n)} className="p-4 bg-slate-700 rounded-xl font-bold text-xl hover:bg-slate-600">{n}</button>)}
+                        <button onClick={() => setAnswer('')} className="p-4 bg-red-500 rounded-xl font-bold">C</button>
+                        <button onClick={() => setAnswer(prev => prev + '0')} className="p-4 bg-slate-700 rounded-xl font-bold text-xl">0</button>
+                        <button onClick={check} className="p-4 bg-green-500 rounded-xl font-bold"><Icons.Check /></button>
+                    </div>
+                    <div className="mt-6 h-12 w-full bg-slate-900 rounded-xl flex items-center justify-center text-2xl font-mono tracking-widest">{answer}</div>
+                </div>
+            );
+        };
+
+        const RiddleGame = ({ onComplete, onMistake, data }) => {
+            const [input, setInput] = useState('');
+            const check = (e) => { e.preventDefault(); if (input.toLowerCase().includes(data.a.toLowerCase())) onComplete(); else { onMistake(); setInput(''); } };
+            return (
+                <div className="p-6 h-full flex flex-col justify-center bg-indigo-50 animate-in">
+                    <div className="bg-white p-6 rounded-2xl shadow-lg mb-6 border border-indigo-100 text-center"><Icons.Lightbulb size={40} className="mx-auto text-yellow-400 mb-4"/><p className="text-lg font-bold text-slate-700 italic">"{data.q}"</p></div>
+                    <form onSubmit={check}><input value={input} onChange={e => setInput(e.target.value)} placeholder="Sua resposta..." className="w-full p-4 rounded-xl border-2 border-indigo-200 mb-4 text-center font-bold text-slate-700" /><button type="submit" className="w-full p-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg">Responder</button></form>
+                </div>
+            );
+        };
+
+        const SimonGame = ({ onComplete, onMistake, data }) => {
+            const [playing, setPlaying] = useState(false);
+            const [userSeq, setUserSeq] = useState([]);
+            const [flash, setFlash] = useState(null);
+            useEffect(() => {
+                let i = 0;
+                const interval = setInterval(() => {
+                    if (i >= data.sequence.length) { clearInterval(interval); setPlaying(true); setFlash(null); return; }
+                    setFlash(data.sequence[i]); setTimeout(() => setFlash(null), 500); i++;
+                }, 1000);
+                return () => clearInterval(interval);
+            }, [data]);
+            const handleTap = (color) => {
+                if (!playing) return;
+                const nextSeq = [...userSeq, color]; setUserSeq(nextSeq);
+                if (data.sequence[nextSeq.length - 1] !== color) { onMistake(); setUserSeq([]); }
+                else if (nextSeq.length === data.sequence.length) onComplete();
+            };
+            const colors = { red: 'bg-red-500', blue: 'bg-blue-500', green: 'bg-green-500', yellow: 'bg-yellow-500' };
+            return (
+                <div className="p-6 h-full flex flex-col items-center justify-center bg-slate-900 animate-in">
+                    <h2 className="text-white font-bold mb-8">{playing ? "Sua vez!" : "Observe..."}</h2>
+                    <div className="grid grid-cols-2 gap-4">{Object.entries(colors).map(([k, cls]) => (<button key={k} onClick={() => handleTap(k)} className={`w-32 h-32 rounded-2xl transition-all duration-200 ${cls} ${flash === k ? 'brightness-150 scale-105 shadow-[0_0_30px_rgba(255,255,255,0.5)]' : 'opacity-80'}`}></button>))}</div>
+                </div>
+            );
+        };
+
+        const CipherGame = ({ onComplete, onMistake, data }) => {
+            const [input, setInput] = useState('');
+            const check = (e) => { e.preventDefault(); if (input.toUpperCase() === data.original) onComplete(); else { onMistake(); setInput(''); } };
+            return (
+                <div className="p-6 h-full flex flex-col items-center justify-center bg-slate-100 animate-in">
+                    <div className="mb-8 text-center"><Icons.Hash size={40} className="mx-auto text-slate-400 mb-2"/><h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Código Interceptado</h2></div><div className="text-4xl font-mono font-black text-slate-800 mb-2 tracking-[0.5em]">{data.ciphered}</div><div className="text-xs text-slate-400 mb-8 bg-white px-3 py-1 rounded border">DICA: Volte uma casa</div><form onSubmit={check} className="w-full"><input value={input} onChange={e => setInput(e.target.value)} placeholder="Decifre..." className="w-full p-4 text-center text-xl font-mono border-2 border-slate-300 rounded-xl mb-4 uppercase" /><button className="w-full p-4 bg-slate-800 text-white font-bold rounded-xl">Desbloquear</button></form>
+                </div>
+            );
+        };
+
+        const ReactionGame = ({ onComplete, onMistake, data }) => {
+            const [state, setState] = useState('waiting'); 
+            useEffect(() => { const timer = setTimeout(() => setState('ready'), data.delay); return () => clearTimeout(timer); }, [data]);
+            const handleClick = () => { if (state === 'waiting') onMistake(); else if (state === 'ready') onComplete(); };
+            return (
+                <div onMouseDown={handleClick} onTouchStart={handleClick} className={`h-full w-full flex flex-col items-center justify-center cursor-pointer transition-colors duration-200 ${state === 'waiting' ? 'bg-red-500' : 'bg-green-500'} animate-in`}>{state === 'waiting' ? <div className="text-white text-center"><Icons.Lock size={60} className="mx-auto mb-4"/><h2 className="text-2xl font-black uppercase">Aguarde...</h2></div> : <div className="text-white text-center animate-bounce"><Icons.Shield size={60} className="mx-auto mb-4"/><h2 className="text-4xl font-black uppercase">AGORA!</h2></div>}</div>
+            );
+        };
+
+        // --- NOVO COMPONENTE: LEITOR DE LIVROS ---
+        const BookReader = ({ book, onClose }) => {
+            return (
+                <div className="h-full flex flex-col bg-white animate-in relative z-50">
+                    <div className="p-4 border-b flex items-center justify-between bg-slate-50 sticky top-0 shadow-sm">
+                        <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition"><Icons.ArrowLeft className="text-slate-500"/></button>
+                        <h2 className="font-bold text-slate-700 truncate max-w-[200px]">{book.title}</h2>
+                        <div className="w-8"></div>
+                    </div>
+                    <div className="flex-grow overflow-y-auto p-8 prose prose-slate prose-lg mx-auto">
+                        <div className="whitespace-pre-wrap font-serif text-slate-800 leading-relaxed">
+                            {book.content || "Conteúdo não disponível. Anexe o PDF na próxima versão."}
+                        </div>
+                    </div>
+                </div>
+            )
+        }
+
+        // --- COMPONENTE PRINCIPAL DO APP ---
 
         const App = () => {
             const [screen, setScreen] = useState('Auth');
             const [activeTab, setActiveTab] = useState('Home');
             const [currentUser, setCurrentUser] = useState(null);
-            const [progress, setProgress] = useState({ currentModuleId: 'm1', completedModules: [] });
+            const [currentBook, setCurrentBook] = useState(MOCK_BOOKS[0]);
+            const [generatedLevels, setGeneratedLevels] = useState([]);
+            const [progress, setProgress] = useState({ currentLevelIndex: 0, completedLevels: [] });
             const [currentGame, setCurrentGame] = useState(null);
             const [userHearts, setUserHearts] = useState(5);
             const [showWinModal, setShowWinModal] = useState(false);
             const [users, setUsers] = useState(INITIAL_USERS);
+            const [readerMode, setReaderMode] = useState(false); 
+
+            useEffect(() => {
+                if (currentBook) {
+                    const levels = generateBookStructure(currentBook);
+                    setGeneratedLevels(levels);
+                }
+            }, [currentBook]);
 
             const handleLogin = (user) => { setCurrentUser(user); setScreen('Home'); };
             const handleRegister = (u) => { setUsers([...users, u]); setCurrentUser(u); setScreen('Home'); };
-            const startGame = (module) => { setCurrentGame(module); setScreen('Game'); };
+            
+            const startGame = (level, index) => { 
+                setCurrentGame({...level, index}); 
+                setScreen('Game'); 
+            };
 
             const handleWin = () => {
                 setShowWinModal(true);
-                const currIdx = MAP_STRUCTURE.findIndex(m => m.id === currentGame.id);
-                const nextModule = MAP_STRUCTURE[currIdx + 1];
-                setProgress(prev => ({ ...prev, completedModules: [...prev.completedModules, currentGame.id], currentModuleId: nextModule ? nextModule.id : 'completed' }));
+                const finishedLevelId = currentGame.id;
+                if (!progress.completedLevels.includes(finishedLevelId)) {
+                     setProgress(prev => ({ 
+                        completedLevels: [...prev.completedLevels, finishedLevelId], 
+                        currentLevelIndex: prev.currentLevelIndex + 1
+                     }));
+                }
             };
             const handleCloseWin = () => { setShowWinModal(false); setScreen('Map'); };
 
+            if (readerMode) {
+                return <BookReader book={currentBook} onClose={() => setReaderMode(false)} />;
+            }
+
             const renderGame = () => {
-                switch(currentGame?.gameType) {
-                    case 'Quiz': return <QuizGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} />;
-                    case 'DragAndDrop': return <DragDropGame onComplete={handleWin} />;
-                    case 'Memory': return <MemoryGame onComplete={handleWin} />;
-                    case 'SpellTyper': return <SpellTyperGame onComplete={handleWin} />;
-                    case 'Battle': return <BattleGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} />;
-                    case 'Unscramble': return <UnscrambleGame onComplete={handleWin} />;
+                if (!currentGame) return null;
+                const gameData = currentGame.data; 
+
+                switch(currentGame.gameType) {
+                    case 'Quiz': return <QuizGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} data={gameData} />;
+                    case 'DragAndDrop': return <DragDropGame onComplete={handleWin} data={gameData} />;
+                    case 'Memory': return <MemoryGame onComplete={handleWin} data={gameData} />;
+                    case 'SpellTyper': return <SpellTyperGame onComplete={handleWin} data={gameData} />;
+                    case 'Battle': return <BattleGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} data={gameData} />;
+                    case 'Unscramble': return <UnscrambleGame onComplete={handleWin} data={gameData} />;
+                    case 'OddOneOut': return <OddOneOutGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} data={gameData} />;
+                    case 'MathLock': return <MathLockGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} data={gameData} />;
+                    case 'Riddle': return <RiddleGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} data={gameData} />;
+                    case 'Simon': return <SimonGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} data={gameData} />;
+                    case 'Cipher': return <CipherGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} data={gameData} />;
+                    case 'Reaction': return <ReactionGame onComplete={handleWin} onMistake={() => setUserHearts(h => h-1)} data={gameData} />;
                     default: return <div>Jogo não encontrado</div>;
                 }
             };
@@ -567,27 +1065,36 @@
                         <div className="flex-grow overflow-y-auto p-6 pb-24">
                             {activeTab === 'Home' && (
                                 <div className="space-y-6 animate-in">
-                                    {MOCK_BOOKS.map(book => {
-                                        const BookIcon = book.icon;
-                                        return (
-                                            <div key={book.id} onClick={() => setScreen('Map')} className="bg-white p-4 rounded-2xl border-2 border-yellow-400 shadow-xl shadow-yellow-100 cursor-pointer transform transition hover:scale-[1.02]">
-                                                <div className="flex items-center space-x-4">
-                                                    <div className="w-16 h-16 bg-yellow-500 rounded-xl flex items-center justify-center text-white shadow-lg"><BookIcon size={32} /></div>
-                                                    <div>
-                                                        <h3 className="font-bold text-lg text-slate-800">{book.title}</h3>
-                                                        <div className="flex items-center space-x-2 mt-1"><span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded text-slate-500">6 Fases</span><span className="text-xs font-bold text-yellow-600">{Math.round((progress.completedModules.length / MAP_STRUCTURE.length) * 100)}% Completo</span></div>
+                                    {MOCK_BOOKS.map(book => (
+                                        <div key={book.id} className="bg-white p-4 rounded-2xl border-2 border-yellow-400 shadow-xl shadow-yellow-100 transform transition hover:scale-[1.02]">
+                                            <div onClick={() => { setCurrentBook(book); setScreen('Map'); }} className="cursor-pointer flex items-center space-x-4 mb-4">
+                                                <div className="w-16 h-16 bg-yellow-500 rounded-xl flex items-center justify-center text-white shadow-lg"><Icons.Feather size={32} /></div>
+                                                <div>
+                                                    <h3 className="font-bold text-lg text-slate-800">{book.title}</h3>
+                                                    <div className="flex items-center space-x-2 mt-1">
+                                                        <span className="text-xs font-bold bg-slate-100 px-2 py-1 rounded text-slate-500">{calculateTotalLevels(book.pageCount)} Fases</span>
+                                                        <span className="text-xs font-bold text-yellow-600">{Math.round((progress.completedLevels.length / calculateTotalLevels(book.pageCount)) * 100)}% Completo</span>
                                                     </div>
                                                 </div>
                                             </div>
-                                        );
-                                    })}
+                                            
+                                            {/* BOTÃO DE LEITURA */}
+                                            <button 
+                                                onClick={() => { setCurrentBook(book); setReaderMode(true); }}
+                                                className="w-full py-3 bg-blue-50 text-blue-600 font-bold rounded-xl border border-blue-100 hover:bg-blue-100 transition flex items-center justify-center"
+                                            >
+                                                <Icons.BookOpen size={20} className="mr-2"/> Ler Livro
+                                            </button>
+                                        </div>
+                                    ))}
                                     <div className="mt-8 p-6 bg-blue-600 rounded-2xl text-white shadow-lg shadow-blue-200">
-                                        <div className="flex items-center space-x-2 mb-2"><Icons.Award className="text-blue-200" /><span className="font-bold uppercase text-xs text-blue-200">Próxima Conquista</span></div>
-                                        <h3 className="font-bold text-lg">Guardião de Inária</h3>
-                                        <p className="text-sm text-blue-100 mt-1 opacity-80">Complete todos os 6 mini-games.</p>
+                                            <div className="flex items-center space-x-2 mb-2"><Icons.Award className="text-blue-200" /><span className="font-bold uppercase text-xs text-blue-200">Próxima Conquista</span></div>
+                                            <h3 className="font-bold text-lg">Guardião de Inária</h3>
+                                            <p className="text-sm text-blue-100 mt-1 opacity-80">Complete o livro base.</p>
                                     </div>
                                 </div>
                             )}
+                            {/* ... outros tabs (Ranking, Achievements, Profile) permanecem iguais ... */}
                             {activeTab === 'Ranking' && (
                                 <div className="space-y-3">
                                     {MOCK_RANKING.map((r, i) => (
@@ -643,23 +1150,28 @@
                     <div className="max-w-md mx-auto bg-slate-100 h-screen flex flex-col">
                         <div className="bg-white p-4 sticky top-0 z-10 shadow-sm flex items-center justify-between">
                             <button onClick={() => setScreen('Home')}><Icons.ArrowLeft className="text-slate-400" /></button>
-                            <span className="font-bold text-slate-700">Mapa da Jornada</span>
-                            <Icons.Settings className="text-slate-400" />
+                            <span className="font-bold text-slate-700">Mapa da Jornada ({generatedLevels.length} Fases)</span>
+                            <button onClick={() => setReaderMode(true)} className="text-blue-500"><Icons.BookOpen /></button>
                         </div>
                         <div className="flex-grow overflow-y-auto p-6 pb-24 relative">
                             <div className="absolute left-1/2 top-10 bottom-10 w-1 bg-slate-300 -translate-x-1/2 rounded-full" />
                             <div className="space-y-10 relative z-10">
-                                {MAP_STRUCTURE.map((mod, idx) => {
-                                    const isCompleted = progress.completedModules.includes(mod.id);
-                                    const isCurrent = progress.currentModuleId === mod.id;
-                                    const isLocked = !isCompleted && !isCurrent;
+                                {generatedLevels.map((mod, idx) => {
+                                    const isCompleted = progress.completedLevels.includes(mod.id);
+                                    const isLocked = idx > 0 && !progress.completedLevels.includes(generatedLevels[idx-1].id); 
+                                    const isCurrent = !isLocked && !isCompleted;
+
                                     return (
-                                        <div key={mod.id} className={`flex flex-col items-center ${idx % 2 === 0 ? 'mr-auto pr-12 self-start' : 'ml-auto pl-12 self-end'} w-1/2 relative`}>
+                                        <div key={mod.id} className={`flex flex-col items-center ${idx % 2 === 0 ? 'mr-auto pr-12 self-start' : 'ml-auto pl-12 self-end'} w-1/2 relative animate-in`} style={{animationDelay: `${idx * 0.05}s`}}>
                                             <div className={`absolute top-8 h-1 w-12 bg-slate-300 ${idx % 2 === 0 ? 'right-0' : 'left-0'}`} />
-                                            <button disabled={isLocked} onClick={() => startGame(mod)} className={`w-16 h-16 rounded-full border-4 shadow-lg flex items-center justify-center transition-transform active:scale-95 z-20 ${isCompleted ? 'bg-yellow-400 border-yellow-500 text-white' : isCurrent ? 'bg-blue-500 border-blue-600 text-white ring-4 ring-blue-200' : 'bg-slate-200 border-slate-300 text-slate-400'}`}>
+                                            <button disabled={isLocked} onClick={() => startGame(mod, idx)} className={`w-16 h-16 rounded-full border-4 shadow-lg flex items-center justify-center transition-transform active:scale-95 z-20 ${isCompleted ? 'bg-yellow-400 border-yellow-500 text-white' : isCurrent ? 'bg-blue-500 border-blue-600 text-white ring-4 ring-blue-200' : 'bg-slate-200 border-slate-300 text-slate-400'}`}>
                                                 {isCompleted ? <Icons.Check /> : isLocked ? <Icons.Lock size={20} /> : <Icons.Star fill="currentColor" />}
                                             </button>
-                                            <div className="mt-2 bg-white p-2 rounded-lg shadow-sm text-center min-w-[120px]"><p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Fase {idx + 1}</p><p className="text-xs font-bold text-slate-700 leading-tight">{mod.title}</p></div>
+                                            <div className="mt-2 bg-white p-2 rounded-lg shadow-sm text-center min-w-[120px]">
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Fase {idx + 1}</p>
+                                                <p className="text-xs font-bold text-slate-700 leading-tight">{mod.title}</p>
+                                                <p className="text-[9px] text-slate-400 mt-1 italic truncate max-w-[100px] mx-auto">{mod.description}</p>
+                                            </div>
                                         </div>
                                     );
                                 })}
@@ -674,7 +1186,10 @@
                     <div className="max-w-md mx-auto bg-white h-screen flex flex-col">
                         <div className="p-4 border-b flex justify-between items-center bg-slate-50">
                             <button onClick={() => setScreen('Map')}><Icons.X className="text-slate-400" /></button>
-                            <span className="font-bold text-slate-700">{currentGame.title}</span>
+                            <div className="text-center">
+                                <span className="block font-bold text-slate-700">{currentGame.title}</span>
+                                <span className="text-[10px] uppercase text-slate-400 font-bold tracking-wider">{currentGame.gameType}</span>
+                            </div>
                             <HeartsDisplay count={userHearts} />
                         </div>
                         <div className="flex-grow overflow-hidden relative">{renderGame()}</div>
